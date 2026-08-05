@@ -107,7 +107,19 @@ def quality_gate_check(role, part_a_files, verification_output, check_desensitiz
         elif re.search(r"(design|architecture|schema|model)", combined, re.I):
             loopback = LoopbackTarget.DESIGN
         else:
-            loopback = LoopbackTarget.REQUIREMENTS
+            # Unclassified failure — escalate, don't guess
+            loopback = LoopbackTarget.NONE
+            fail_reasons.append(
+                "Unclassified failure: unable to determine loopback target. "
+                "Reviewing agent should analyze the error and suggest target."
+            )
+
+    # If NONE but gate failed, escalate to human
+    if loopback == LoopbackTarget.NONE and status == GateStatus.FAIL:
+        fail_reasons.append(
+            "[HUMAN_GATE] No automatic loopback target matched. "
+            "Error context: {}".format(combined[:200])
+        )
 
     return QualityGateResult(
         status=status, checks=checks, exit_fingerprint=exit_fp,

@@ -92,20 +92,40 @@ def test_context_budget():
     assert check_context_budget(16000) == "CTX_CRITICAL"
 
 
-def test_loopback_targets():
-    """Test oriented loopback routing logic."""
+def test_oriented_loopback():
+    """Oriented loopback: errors route to the right target."""
     tf = "/tmp/agentgate_lb.txt"
-
-    # Syntax error -> Backend (定向回环)
     with open(tf, "w") as f:
         f.write("test")
-    result = quality_gate_check("R2", [tf], "SyntaxError: invalid syntax\nEXIT:1\n")
-    assert result.loopback_target == LoopbackTarget.BACKEND, "Expected BACKEND, got {}".format(result.loopback_target)
 
-    # Security -> Security (定向回环)
-    result2 = quality_gate_check("R6", [tf], "XSS vulnerability found in template\nEXIT:1\n")
-    assert result2.loopback_target == LoopbackTarget.SECURITY, "Expected SECURITY, got {}".format(result2.loopback_target)
+    # Syntax error -> Backend
+    r1 = quality_gate_check("R2", [tf], "SyntaxError: invalid syntax\nEXIT:1\n")
+    assert r1.loopback_target == LoopbackTarget.BACKEND
 
+    # Security -> Security
+    r2 = quality_gate_check("R6", [tf], "XSS vulnerability found\nEXIT:1\n")
+    assert r2.loopback_target == LoopbackTarget.SECURITY
+
+    # UI/CSS -> Frontend
+    r3 = quality_gate_check("R5", [tf], "CSS layout broken on mobile\nEXIT:1\n")
+    assert r3.loopback_target == LoopbackTarget.FRONTEND
+
+    os.remove(tf)
+
+
+def test_unclassified_loopback():
+    """Unclassified errors → NONE (escalate to human, not guess R1)."""
+    tf = "/tmp/agentgate_unknown.txt"
+    with open(tf, "w") as f:
+        f.write("test")
+    result = quality_gate_check(
+        "R2", [tf],
+        "Something weird happened but no recognizable pattern\nEXIT:1\n"
+    )
+    # Should be NONE (escalate), not REQUIREMENTS (blind guess)
+    assert result.loopback_target == LoopbackTarget.NONE, \
+        "Unclassified errors should escalate, got: {}".format(result.loopback_target)
+    assert any("HUMAN_GATE" in r or "Unclassified" in r for r in result.fail_reasons)
     os.remove(tf)
 
 
@@ -121,7 +141,8 @@ if __name__ == "__main__":
         test_quality_gate_missing_file,
         test_quality_gate_no_fingerprint,
         test_context_budget,
-        test_loopback_targets,
+        test_oriented_loopback,
+        test_unclassified_loopback,
     ]
     passed = 0
     failed = 0

@@ -186,6 +186,16 @@ class AgentGate:
                     print("\n[FATAL] Loopback limit ({}) exceeded.".format(self.state.max_iterations))
                     break
                 target = self._gate_history[-1].loopback_target
+
+                # Human gate: when automated classification fails
+                if target == LoopbackTarget.NONE:
+                    print("\n[HUMAN_GATE] Cannot determine loopback target automatically.")
+                    from .human_gate import human_gate_interactive
+                    target = human_gate_interactive(
+                        self._gate_history[-1].fail_reasons,
+                        self._gate_history[-1].exit_fingerprint.raw_output if self._gate_history[-1].exit_fingerprint else "",
+                    )
+
                 print("\n[LOOPBACK] -> {} (reason: {})".format(
                     target.value, ", ".join(self._gate_history[-1].fail_reasons)))
                 self.state.current_role = target.value
