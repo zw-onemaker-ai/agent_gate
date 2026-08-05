@@ -8,8 +8,7 @@ Core design (extracted from 一人公司 v4.4.0):
 """
 
 import json
-import os
-import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -18,7 +17,7 @@ from .models import (
     AgentOutput, ContextPackage, GateStatus, LoopbackTarget,
     PipelineState, QualityGateResult,
 )
-from .validators import quality_gate_check, run_bash, check_context_budget
+from .validators import quality_gate_check, run_bash
 
 
 class AgentGate:
@@ -37,6 +36,7 @@ class AgentGate:
         self.model_name = model_name
         self._agents = {}  # type: Dict[str, dict]
         self._gate_history = []  # type: List[QualityGateResult]
+        self._lock = threading.Lock()  # guards _gate_history and loopback_count in parallel mode
 
     def register_agent(self, role, name, prompt_template="",
                        verify_cmd="", output_file="",
@@ -185,7 +185,8 @@ class AgentGate:
             part_a_files=part_a_files,
             verification_output=verify_output,
         )
-        self._gate_history.append(gate_result)
+        with self._lock:
+            self._gate_history.append(gate_result)
 
         agent_output = AgentOutput(
             role=role,
@@ -308,17 +309,19 @@ class AgentGate:
             output = self.run_step(role, context)
         except Exception as e:
             print("\n[ERROR] {} crashed: {}".format(role, e))
-            self.state.loopback_count += 1
+            with self._lock:
+                self.state.loopback_count += 1
             return None
 
-        pkg = ContextPackage(
-            package_id="ctx-{}-{}".format(role, datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")),
-            source_role=role,
-            target_roles=[],
-            agent_output=output,
-            gate_result=self._gate_history[-1],
-        )
-        self.state.steps.append(pkg)
+        with self._lock:
+            pkg = ContextPackage(
+                package_id="ctx-{}-{}".format(role, datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")),
+                source_role=role,
+                target_roles=[],
+                agent_output=output,
+                gate_result=self._gate_history[-1],
+            )
+            self.state.steps.append(pkg)
         return output
 
     def _run_parallel_stage(self, roles, context):
@@ -368,13 +371,6 @@ class AgentGate:
             if output and output.context_card:
                 cards.append(output.context_card)
         return " | ".join(cards)
-
-    def _next_roles(self, current, roles):
-        # type: (str, List[str]) -> List[str]
-        idx = roles.index(current) if current in roles else -1
-        if idx < 0 or idx + 1 >= len(roles):
-            return []
-        return [roles[idx + 1]]
 
     def _build_context_card(self, role, agent, gate):
         # type: (str, dict, QualityGateResult) -> str
