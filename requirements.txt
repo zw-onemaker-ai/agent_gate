@@ -1,0 +1,13 @@
+# AgentGate - AI Agent Quality Framework
+# Core dependencies (minimal)
+
+# For OpenAI/LiteLLM provider support (optional)
+# litellm>=1.0.0
+
+# For Ollama (no Python deps needed - uses HTTP API via urllib)
+# Just install ollama and pull a model:
+#   curl -fsSL https://ollama.com/install.sh | sh
+#   ollama pull qwen2.5:7b
+
+# For dev/testing
+# pytest>=7.0.0
