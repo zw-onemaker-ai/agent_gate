@@ -1,0 +1,45 @@
+{
+  "project": {
+    "name": "data_analysis",
+    "description": "从原始数据到可视化看板的分析管线"
+  },
+  "agents": [
+    {
+      "role": "R1",
+      "name": "Data Analyst",
+      "role_goal": "分析数据集，产出包含关键统计、趋势和行动建议的摘要报告。",
+      "output_file": "data_report.md",
+      "scenario_type": "data_analysis",
+      "acceptance_criteria": [
+        "Report must be >200 characters",
+        "Must include '## Key Statistics' section",
+        "Must include '## Recommendations' section",
+        "Must mention the number of rows analyzed"
+      ]
+    },
+    {
+      "role": "R2",
+      "name": "Visualization Designer",
+      "role_goal": "基于分析报告设计可视化方案：选择图表类型、配色、轴映射。",
+      "output_file": "viz_plan.md",
+      "scenario_type": "data_analysis",
+      "acceptance_criteria": [
+        "Must specify at least 2 chart types",
+        "Must explain color scheme rationale",
+        "Must reference data from the analysis report"
+      ]
+    },
+    {
+      "role": "R3",
+      "name": "Dashboard Builder",
+      "role_goal": "生成带 Chart.js 的完整 HTML 看板。",
+      "output_file": "dashboard.html",
+      "scenario_type": "code_gen",
+      "acceptance_criteria": [
+        "Must be valid HTML with proper structure",
+        "Must include Chart.js CDN",
+        "Must have at least one canvas element"
+      ]
+    }
+  ]
+}

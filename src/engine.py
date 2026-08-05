@@ -200,69 +200,174 @@ class AgentGate:
         self._print_gate_report(gate_result)
         return agent_output
 
-    def run_pipeline(self, initial_context=""):
-        # type: (str) -> PipelineState
-        """Run the full pipeline with loopback."""
+    def run_pipeline(self, initial_context="", stages=None):
+        # type: (str, list) -> PipelineState
+        """Run the full pipeline with loopback and optional parallel stages.
+
+        Args:
+            initial_context: Initial idea/context for the pipeline.
+            stages: Optional list of stages. Each stage is a dict:
+                {"roles": ["R1"], "parallel": False}
+                {"roles": ["R4", "R5"], "parallel": True}
+                If None, defaults to sequential execution of all registered agents.
+
+        Parallel stages: all agents in the stage run on the same upstream context,
+        their outputs are merged before passing to the next stage.
+        """
         context = initial_context
         roles = list(self._agents.keys())
 
-        while self.state.current_role in self._agents:
-            current = self.state.current_role
+        # Build pipeline plan
+        if stages:
+            plan = self._build_plan_from_stages(stages)
+        else:
+            # Default: sequential, one agent per stage
+            plan = [{"roles": [r], "parallel": False} for r in roles]
 
-            try:
-                output = self.run_step(current, context)
-            except Exception as e:
-                print("\n[ERROR] {} crashed: {}".format(current, e))
-                self.state.loopback_count += 1
-                if self.state.loopback_count >= self.state.max_iterations:
-                    print("\n[FATAL] Max iterations ({}) reached.".format(self.state.max_iterations))
-                    break
-                continue
+        print("\n[PIPELINE] {} stages: {}".format(
+            len(plan),
+            " → ".join("+".join(s["roles"]) for s in plan)
+        ))
 
-            pkg = ContextPackage(
-                package_id="ctx-{}-{}".format(current, datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")),
-                source_role=current,
-                target_roles=self._next_roles(current, roles),
-                agent_output=output,
-                gate_result=self._gate_history[-1],
+        stage_idx = 0
+        while stage_idx < len(plan):
+            stage = plan[stage_idx]
+            stage_roles = stage["roles"]
+            is_parallel = stage.get("parallel", False)
+
+            if is_parallel and len(stage_roles) > 1:
+                # Multi-agent parallel execution
+                outputs = self._run_parallel_stage(stage_roles, context)
+            else:
+                # Single agent sequential
+                outputs = {}
+                for role in stage_roles:
+                    out = self._run_single_agent(role, context)
+                    if out is None:
+                        return self.state  # Pipeline halted
+                    outputs[role] = out
+
+            # Check all outputs passed gate
+            all_pass = all(
+                o.quality_gate == GateStatus.PASS for o in outputs.values()
             )
-            self.state.steps.append(pkg)
+            if not all_pass:
+                # Find first failing agent for loopback
+                failed_role = None
+                for role, out in outputs.items():
+                    if out.quality_gate == GateStatus.FAIL:
+                        failed_role = role
+                        break
 
-            if output.quality_gate == GateStatus.FAIL:
                 self.state.loopback_count += 1
                 if self.state.loopback_count >= self.state.max_iterations:
-                    print("\n[FATAL] Loopback limit ({}) exceeded.".format(self.state.max_iterations))
+                    print("\n[FATAL] Loopback limit ({}) exceeded.".format(
+                        self.state.max_iterations))
                     break
-                target = self._gate_history[-1].loopback_target
 
-                # Human gate: when automated classification fails
+                target = self._gate_history[-1].loopback_target
                 if target == LoopbackTarget.NONE:
-                    print("\n[HUMAN_GATE] Cannot determine loopback target automatically.")
+                    print("\n[HUMAN_GATE] Cannot determine loopback target.")
                     from .human_gate import human_gate_interactive
                     target = human_gate_interactive(
                         self._gate_history[-1].fail_reasons,
                         self._gate_history[-1].exit_fingerprint.raw_output if self._gate_history[-1].exit_fingerprint else "",
                     )
 
-                print("\n[LOOPBACK] -> {} (reason: {})".format(
-                    target.value, ", ".join(self._gate_history[-1].fail_reasons)))
-                self.state.current_role = target.value
-                context = "[LOOPBACK from {}] {}".format(
-                    current, ", ".join(self._gate_history[-1].fail_reasons))
+                print("\n[LOOPBACK] {} → {} (reason: {})".format(
+                    "+".join(stage_roles), target.value,
+                    ", ".join(self._gate_history[-1].fail_reasons)))
+
+                # Find which stage contains the loopback target
+                target_stage = self._find_stage_for_role(plan, target.value)
+                if target_stage is not None:
+                    stage_idx = target_stage
+                else:
+                    stage_idx = 0  # Fallback: restart from beginning
+                context = "[LOOPBACK] {}".format(
+                    ", ".join(self._gate_history[-1].fail_reasons))
                 continue
 
-            next_idx = roles.index(current) + 1
-            if next_idx >= len(roles):
-                print("\n" + "=" * 50)
-                print("  PIPELINE COMPLETE")
-                print("  Steps: {} | Loopbacks: {}".format(
-                    len(self.state.steps), self.state.loopback_count))
-                print("=" * 50)
-                break
-            self.state.current_role = roles[next_idx]
-            context = output.context_card
+            # All passed — advance to next stage
+            # Merge context from all agents in this stage
+            context = self._merge_context_cards(outputs)
+            stage_idx += 1
+
+        if stage_idx >= len(plan):
+            print("\n" + "=" * 50)
+            print("  PIPELINE COMPLETE")
+            print("  Stages: {} | Loopbacks: {}".format(
+                len(plan), self.state.loopback_count))
+            print("=" * 50)
 
         return self.state
+
+    def _run_single_agent(self, role, context):
+        """Run one agent and handle gate/loopback. Returns AgentOutput or None if halted."""
+        try:
+            output = self.run_step(role, context)
+        except Exception as e:
+            print("\n[ERROR] {} crashed: {}".format(role, e))
+            self.state.loopback_count += 1
+            return None
+
+        pkg = ContextPackage(
+            package_id="ctx-{}-{}".format(role, datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")),
+            source_role=role,
+            target_roles=[],
+            agent_output=output,
+            gate_result=self._gate_history[-1],
+        )
+        self.state.steps.append(pkg)
+        return output
+
+    def _run_parallel_stage(self, roles, context):
+        """Run multiple agents in parallel. Returns {role: AgentOutput}."""
+        import concurrent.futures
+
+        print("\n[PARALLEL] Running {} agents: {}".format(len(roles), ", ".join(roles)))
+        outputs = {}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(roles)) as executor:
+            futures = {
+                executor.submit(self._run_single_agent, role, context): role
+                for role in roles
+            }
+            for future in concurrent.futures.as_completed(futures):
+                role = futures[future]
+                try:
+                    output = future.result()
+                    if output:
+                        outputs[role] = output
+                except Exception as e:
+                    print("\n[ERROR] Parallel agent {} crashed: {}".format(role, e))
+
+        print("[PARALLEL] {} agents completed".format(len(outputs)))
+        return outputs
+
+    def _build_plan_from_stages(self, stages):
+        """Convert stage definitions to internal plan format."""
+        plan = []
+        for stage in stages:
+            roles = stage.get("roles", [])
+            parallel = stage.get("parallel", False) and len(roles) > 1
+            plan.append({"roles": roles, "parallel": parallel})
+        return plan
+
+    def _find_stage_for_role(self, plan, role):
+        """Find which stage index contains a given role."""
+        for i, stage in enumerate(plan):
+            if role in stage["roles"]:
+                return i
+        return None
+
+    def _merge_context_cards(self, outputs):
+        """Merge context cards from multiple agents for downstream consumption."""
+        cards = []
+        for role, output in outputs.items():
+            if output and output.context_card:
+                cards.append(output.context_card)
+        return " | ".join(cards)
 
     def _next_roles(self, current, roles):
         # type: (str, List[str]) -> List[str]

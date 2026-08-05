@@ -1,0 +1,44 @@
+{
+  "project": {
+    "name": "code_gen",
+    "description": "从需求到可运行代码的完整开发管线"
+  },
+  "agents": [
+    {
+      "role": "R1",
+      "name": "Requirements Analyst",
+      "role_goal": "分析用户需求，产出结构化需求文档，包含用户故事和验收标准。",
+      "output_file": "requirements.md",
+      "scenario_type": "code_gen",
+      "acceptance_criteria": [
+        "Must contain at least 3 user stories",
+        "Must contain numbered acceptance criteria",
+        "Must define MVP scope"
+      ]
+    },
+    {
+      "role": "R2",
+      "name": "Backend Developer",
+      "role_goal": "根据需求文档生成可运行的 Python FastAPI 代码。包含健康检查端点和完整的 CRUD 操作。",
+      "output_file": "main.py",
+      "scenario_type": "code_gen",
+      "acceptance_criteria": [
+        "Python syntax must be valid",
+        "Must include /health endpoint",
+        "Must include if __name__ == '__main__' block"
+      ]
+    },
+    {
+      "role": "R3",
+      "name": "Code Reviewer",
+      "role_goal": "审查后端代码的 Bug、安全漏洞和代码风格问题，输出审查报告和修复建议。",
+      "output_file": "review_report.md",
+      "scenario_type": "code_gen",
+      "acceptance_criteria": [
+        "Must list all issues found or state 'None'",
+        "Must include security check section",
+        "Must output a final verdict: PASS or FAIL"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "project": {
+    "name": "content_writing",
+    "description": "从选题到成稿的内容创作管线"
+  },
+  "agents": [
+    {
+      "role": "R1",
+      "name": "Content Strategist",
+      "role_goal": "根据给定主题，产出内容策略：目标读者、文章角度、关键要点。",
+      "output_file": "content_plan.md",
+      "scenario_type": "content_writing",
+      "acceptance_criteria": [
+        "Must define target audience",
+        "Must list at least 2 article angles",
+        "Must include acceptance criteria for the draft"
+      ]
+    },
+    {
+      "role": "R2",
+      "name": "Writer",
+      "role_goal": "根据内容策略撰写完整文章初稿。中文写作，有深度有案例。",
+      "output_file": "draft.md",
+      "scenario_type": "content_writing",
+      "acceptance_criteria": [
+        "Draft must be >300 characters",
+        "Must include at least 2 subheadings",
+        "Must end with a call to action"
+      ]
+    },
+    {
+      "role": "R3",
+      "name": "Editor",
+      "role_goal": "审核文章初稿质量，修正问题，输出最终版本。",
+      "output_file": "final_article.md",
+      "scenario_type": "content_writing",
+      "acceptance_criteria": [
+        "Must state verdict: PASS or NEEDS REVISION",
+        "Must list all issues or 'None'",
+        "Final article must be included"
+      ]
+    }
+  ]
+}
