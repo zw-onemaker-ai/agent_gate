@@ -1,135 +1,99 @@
-# AgentGate
+# AgentGate — AI Agent Quality Framework
 
-**A lightweight quality assurance framework for AI agent pipelines.**
+> **作者**: 一人公司 · 产品工厂  
+> **版本**: v1.2  
+> **测试**: 76 passed, 0 failed  
+> **许可**: MIT License
 
-Every agent output is Bash-verified, fingerprint-checked, and gate-audited before it reaches the next agent. No hallucinations pass through.
-
----
-
-## The Problem
-
-AI agents hallucinate. Multi-agent pipelines amplify this: Agent 2 trusts Agent 1's output, Agent 3 trusts Agent 2, and by step 4, the errors are buried under layers of unverified claims.
-
-Existing frameworks (LangGraph, CrewAI, AutoGen) focus on **"getting agents to work"**. None focus on **"verifying agents worked correctly"**.
-
-## The Solution
-
-AgentGate adds three simple but non-negotiable quality protocols:
-
-| Protocol | What It Does | Why It Matters |
-|----------|-------------|----------------|
-| **1. EXIT_CODE Fingerprint** | All Bash verification outputs must carry `EXIT:<code>` — printed by the shell, unforgeable by LLMs | Prevents agents from fabricating "all tests passed" |
-| **2. Quality Gate** | Every agent output is checked for file existence + EXIT fingerprint before passing to the next agent | Stops error propagation at the boundary |
-| **3. Oriented Loopback** | Failures route to the correct upstream agent (CSS bug→Frontend, not always→Requirements) | 80% fewer wasted re-runs |
+一句话需求 → 自动拆解Agent团队 → 智能分配多平台模型 → 质量门禁 → 定向回环修复 → 全链路诊断
 
 ---
+
+## 架构
+
+```
+你说 "做个电商后台"
+        ↓
+  ┌─────────────────────────────┐
+  │  设计脑 (Orchestrator)       │
+  │  自动拆解: R1需求→R2设计→R4开发 │
+  │  Platform Advisor: 百炼写代码, Ollama做轻活 │
+  └─────────────┬───────────────┘
+                ↓ config.json
+  ┌─────────────────────────────┐
+  │  执行脑 (AgentGate Engine)   │
+  │  Agent → Quality Gate → Contract → 下一Agent │
+  │  Fail → Loopback → 自动修复   │
+  │  Pipeline Doctor → 全链路诊断  │
+  └─────────────────────────────┘
+```
 
 ## Quick Start
 
-### Install
-
 ```bash
-git clone https://github.com/yourname/agent-gate.git
-cd agent-gate
-pip install -r requirements.txt
+# 1. 设置你的API Key
+export DASHSCOPE_API_KEY="sk-xxx"   # 百炼
+# 或: export OPENAI_API_KEY="sk-xxx"
+# 或: 什么都不设 → 自动用本地Ollama (免费)
+
+# 2. 初始化设计脑
+python3 -c "from src.workspace import init_workspace; init_workspace()"
+
+# 3. 一句话建项目
+python3 -c "
+from src.platform_advisor import analyze_project
+plan = analyze_project('做一个FastAPI Todo后端，支持CRUD和用户认证')
+print(plan.summary)
+"
+
+# 4. 自动生成配置 + 跑管线
+python3 -c "
+from src.platform_advisor import analyze_project, resolve_config
+from src.config_loader import build_pipeline
+import json
+plan = analyze_project('做一个FastAPI Todo后端')
+config = resolve_config(plan)
+with open('config.json', 'w') as f:
+    json.dump(config, f, indent=2, ensure_ascii=False)
+gate = build_pipeline(config, provider='litellm', model='qwen-turbo')['gate']
+gate.run_pipeline(initial_context='按需求开发')
+"
+
+# 5. 跑测试
+python3 tests/test_core.py
 ```
 
-### Run the Demo
+## 核心模块
 
-```bash
-# Mock mode (no LLM needed — tests the gate logic):
-python3.9 examples/demo_3role.py --mock
+| 模块 | 功能 |
+|------|------|
+| `platform_advisor.py` | 6平台知识库, 自动推荐最优模型组合, 预估成本 |
+| `orchestrator_agent.py` | 设计脑: 自然语言→管线配置 |
+| `engine.py` | 执行引擎: 多Agent串行/并行, 质量门禁, 定向回环 |
+| `cpoo_scorer.py` | 提示词质量评分 (≥80合格) |
+| `pipeline_doctor.py` | 6项全链路诊断, 自动修复 |
+| `tool_registry.py` | 10工具白名单, 风险分级 |
+| `memory_manager.py` | 管线状态持久化, 4KB索引防膨胀 |
+| `workspace.py` | 设计脑统一配置入口 |
 
-# With Ollama (local model):
-ollama pull qwen2.5:7b
-python3.9 examples/demo_3role.py --provider ollama --model qwen2.5:7b
+## 支持的AI平台
 
-# With OpenAI:
-export OPENAI_API_KEY=sk-...
-python3.9 examples/demo_3role.py --provider openai --model gpt-4o-mini
-```
+百炼(DashScope) · OpenAI · DeepSeek · Groq · Ollama(本地) · Anthropic
 
-### Concepts
-
-```
-  ┌─────────┐    ┌──────────────┐    ┌─────────┐    ┌──────────────┐    ┌─────────┐
-  │ Agent 1 │───▶│ Quality Gate │───▶│ Agent 2 │───▶│ Quality Gate │───▶│ Agent 3 │
-  │ (R1)    │    │ ✓ files      │    │ (R2)    │    │ ✓ files      │    │ (R3)    │
-  │         │    │ ✓ EXIT:0     │    │         │    │ ✓ EXIT:0     │    │         │
-  └─────────┘    └──────────────┘    └─────────┘    └──────────────┘    └─────────┘
-       │               │                  │               │                  │
-       ▼               ▼                  ▼               ▼                  ▼
-  requirements.md  Gate:PASS         main.py         Gate:PASS        review_report.md
-                   EXIT:0                             EXIT:0
-```
-
-### Core API
-
-```python
-from agent_gate import AgentGate
-
-gate = AgentGate(project_name="my_project")
-
-# Register agents in pipeline order
-gate.register_agent(
-    role="R1", name="Requirements",
-    prompt_template=R1_PROMPT,
-    output_file="requirements.md",
-    verify_cmd="ls requirements.md && echo 'OK'",
-)
-
-gate.register_agent(
-    role="R2", name="Backend Dev",
-    prompt_template=R2_PROMPT,
-    output_file="main.py",
-    verify_cmd="python3 -m py_compile main.py",
-)
-
-# Run with quality gates at every step
-state = gate.run_pipeline(initial_context="Build a Todo API")
-print(gate.summary())
-```
-
----
-
-## Design Philosophy
-
-**1. Verification over trust.** Agent output is guilty until proven correct.
-
-**2. Minimal, not maximal.** Three protocols, not a framework. You bring your own agents (LangChain, CrewAI, raw LLM calls) — AgentGate only adds the verification layer.
-
-**3. Bash as universal validator.** No custom DSL. If you can verify it with a shell command, AgentGate can enforce it.
-
-**4. Model-agnostic.** Works with Ollama, OpenAI, LiteLLM, or any model that can receive a prompt and return text.
-
----
-
-## Background
-
-Extracted from production experience building 4 full-stack AI products as a solo developer. The core protocols were battle-tested across 50+ pipeline runs with real code generation. Key insight: **Bash verification with EXIT_CODE fingerprints is the cheapest, most reliable anti-hallucination mechanism available.**
-
----
-
-## Project Structure
-
-```
-agent_gate/
-├── src/
-│   ├── engine.py        # Pipeline orchestrator + quality gate engine
-│   ├── models.py        # Data models (AgentOutput, GateResult, PipelineState)
-│   └── validators.py    # Bash verification + EXIT fingerprint + gate logic
-├── examples/
-│   └── demo_3role.py    # 3-role demo: Requirements → Code → Review
-├── docs/
-│   └── protocols/       # Protocol design docs
-│       ├── 01_exit_fingerprint.md
-│       ├── 02_quality_gate.md
-│       └── 03_oriented_loopback.md
-├── tests/
-├── requirements.txt
-└── README.md
-```
+自动选择: 轻量任务→便宜模型, 代码生成→最强模型, 安全审计→本地模型
 
 ## License
 
-MIT
+MIT License — Copyright (c) 2026 一人公司 · 产品工厂
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
