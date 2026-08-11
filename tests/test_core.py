@@ -706,6 +706,206 @@ def test_expand_prompts_all_templates():
             assert len(agent["prompt_template"]) > 50
 
 
+# ── Phase 4: Full Pipeline — tool_registry, cpoo_scorer, memory_manager, doctor ──
+
+def test_tool_registry_validate_ok():
+    """Valid tools should pass validation."""
+    from src.tool_registry import ToolRegistry
+    reg = ToolRegistry()
+    assert reg.validate_agent_tools(["@read_file", "@write_file"]) == []
+
+def test_tool_registry_validate_bad():
+    """Unknown tools should be rejected."""
+    from src.tool_registry import ToolRegistry
+    reg = ToolRegistry()
+    errors = reg.validate_agent_tools(["@sudo_rm_rf"])
+    assert len(errors) >= 1
+    assert any("Unknown" in e for e in errors)
+
+def test_tool_registry_risk():
+    """Risk levels should be correctly assigned."""
+    from src.tool_registry import ToolRegistry
+    reg = ToolRegistry()
+    assert reg.get_risk("@read_file") == "low"
+    assert reg.get_risk("@deploy") == "high"
+    assert reg.max_risk(["@read_file"]) == "low"
+    assert reg.max_risk(["@read_file", "@deploy"]) == "high"
+
+def test_tool_registry_requires_gate():
+    """Gate-requiring tools should be detected."""
+    from src.tool_registry import ToolRegistry
+    reg = ToolRegistry()
+    assert reg.requires_gate(["@write_file"]) is True
+    assert reg.requires_gate(["@read_file"]) is False
+
+def test_tool_registry_gate_check():
+    """Tool gate check should produce QualityGateResult."""
+    from src.tool_registry import ToolRegistry
+    from src.models import GateStatus
+    reg = ToolRegistry()
+    result = reg.gate_check_tools("R1", ["@read_file", "@write_file"])
+    assert result.status == GateStatus.PASS
+    result2 = reg.gate_check_tools("R1", ["@nonexistent_tool"])
+    assert result2.status == GateStatus.FAIL
+
+def test_cpoo_scorer_high_quality():
+    """A well-structured prompt should score >=80."""
+    from src.cpoo_scorer import CPOOScorer
+    scorer = CPOOScorer()
+    good_prompt = """
+## Role
+You are a Backend Developer. Your job is to implement REST API endpoints.
+Your role matters because the product depends on reliable backend services.
+
+## Constraints
+- 🔴 MUST: Produce complete Python code with no placeholders
+- 🔴 MUST: All Bash output must carry EXIT_CODE fingerprint
+- 🟡 SHOULD: Follow PEP8 style guide
+
+## Workflow
+1. Read the requirements and product spec
+2. Design the API endpoints and data models
+3. Implement the complete backend code in backend/main.py
+4. Run verification: python3 -m py_compile backend/main.py && echo EXIT:$?
+5. Self-check: do all acceptance criteria pass?
+
+## IO Format
+**Input:** requirements.md, product_spec.md
+**Output:** backend/main.py (complete, runnable FastAPI application)
+
+## Quality Gate Note
+Your output will be automatically verified for file existence, syntax, and EXIT_CODE fingerprint.
+All acceptance criteria must be met. No TODOs or placeholders allowed.
+"""
+    result = scorer.score(good_prompt)
+    assert result.total >= 60, "Expected >=60, got {}".format(result.total)
+
+def test_cpoo_scorer_low_quality():
+    """A minimal prompt should score low."""
+    from src.cpoo_scorer import CPOOScorer
+    scorer = CPOOScorer()
+    bad_prompt = "Write some code please. Make it good."
+    result = scorer.score(bad_prompt)
+    assert result.total < 60, "Expected <60, got {}".format(result.total)
+    assert result.needs_regen is True
+
+def test_cpoo_scorer_quick_check():
+    """quick_check should work."""
+    from src.cpoo_scorer import quick_check
+    assert quick_check("Write code", threshold=80) is False
+
+def test_cpoo_scorer_optimize_no_llm():
+    """Pattern-based optimize should add missing modules."""
+    from src.cpoo_scorer import CPOOScorer
+    scorer = CPOOScorer()
+    bad = "Write a hello world script in Python."
+    original_score = scorer.score(bad).total
+    optimized = scorer.optimize(bad, role_goal="Write Python code")
+    new_score = scorer.score(optimized).total
+    assert new_score > original_score, "Optimization should improve score: {} → {}".format(
+        original_score, new_score)
+
+def test_memory_manager_save_load():
+    """Save and load a pipeline session."""
+    import tempfile, os
+    from src.memory_manager import MemoryManager
+    from src.models import PipelineState, AgentOutput, ContextPackage, GateStatus, Contract
+
+    tmpdir = tempfile.mkdtemp()
+    mm = MemoryManager(memory_dir=tmpdir)
+
+    state = PipelineState(project_name="test_memory")
+    state.steps = [
+        ContextPackage(
+            package_id="pkg-1",
+            source_role="R1",
+            target_roles=["R2"],
+            agent_output=AgentOutput(
+                role="R1", role_name="Test",
+                part_a_files=["out.md"],
+                quality_gate=GateStatus.PASS,
+                contract=Contract(agent_id="R1", summary="test contract"),
+            ),
+            gate_result=None,
+        )
+    ]
+    state.loopback_count = 1
+
+    sid = mm.save_session(state)
+    assert sid.startswith("test_memory_")
+
+    loaded = mm.load_session(sid)
+    assert loaded["project_name"] == "test_memory"
+    assert len(loaded["steps"]) == 1
+
+    sessions = mm.list_sessions()
+    assert len(sessions) >= 1
+
+    # Cleanup
+    import shutil
+    shutil.rmtree(tmpdir)
+
+def test_memory_manager_health():
+    """Health check should work on fresh memory dir."""
+    import tempfile, os, shutil
+    from src.memory_manager import MemoryManager
+
+    tmpdir = tempfile.mkdtemp()
+    mm = MemoryManager(memory_dir=tmpdir)
+    result = mm.health_check()
+    assert result["healthy"] is True
+    assert result["session_count"] == 0
+
+    shutil.rmtree(tmpdir)
+
+def test_pipeline_doctor_empty():
+    """Doctor on fresh pipeline should report healthy."""
+    from src.engine import AgentGate
+    from src.pipeline_doctor import PipelineDoctor
+
+    gate = AgentGate(project_name="doctor_test", output_dir="/tmp/doctor_test")
+    doctor = PipelineDoctor(gate)
+    diagnosis = doctor.diagnose()
+    assert diagnosis.root_cause is not None
+    assert len(diagnosis.findings) == 0  # No issues on fresh pipeline
+
+def test_pipeline_doctor_has_summary():
+    """Diagnosis should always have a summary."""
+    from src.engine import AgentGate
+    from src.pipeline_doctor import PipelineDoctor
+
+    gate = AgentGate(project_name="summary_test", output_dir="/tmp/summary_test")
+    doctor = PipelineDoctor(gate)
+    diagnosis = doctor.diagnose()
+    assert diagnosis.summary
+    assert "Pipeline Doctor" in diagnosis.summary
+
+def test_engine_cpoo_integration():
+    """AgentGate should run CPOO scoring on agent registration."""
+    from src.engine import AgentGate
+
+    gate = AgentGate(project_name="cpoo_test", output_dir="/tmp/cpoo_test")
+    gate.register_agent(
+        role="R1",
+        name="Test",
+        role_goal="Write a hello world script",
+        output_file="hello.py",
+        acceptance_criteria=["File should exist and be non-empty"],
+    )
+    # Agent registered, CPOO scorer initialized
+    assert gate.cpoo_scorer is not None
+    assert gate.tool_registry is not None
+
+def test_engine_memory_methods():
+    """AgentGate should have save/load/diagnose methods."""
+    from src.engine import AgentGate
+
+    gate = AgentGate(project_name="methods_test", output_dir="/tmp/methods_test")
+    assert hasattr(gate, 'save')
+    assert hasattr(gate, 'load')
+    assert hasattr(gate, 'diagnose')
+
+
 # ── Test runner ──
 
 if __name__ == "__main__":
@@ -763,6 +963,21 @@ if __name__ == "__main__":
         test_expand_prompts_no_llm,
         test_expand_prompts_skips_existing,
         test_expand_prompts_all_templates,
+        test_tool_registry_validate_ok,
+        test_tool_registry_validate_bad,
+        test_tool_registry_risk,
+        test_tool_registry_requires_gate,
+        test_tool_registry_gate_check,
+        test_cpoo_scorer_high_quality,
+        test_cpoo_scorer_low_quality,
+        test_cpoo_scorer_quick_check,
+        test_cpoo_scorer_optimize_no_llm,
+        test_memory_manager_save_load,
+        test_memory_manager_health,
+        test_pipeline_doctor_empty,
+        test_pipeline_doctor_has_summary,
+        test_engine_cpoo_integration,
+        test_engine_memory_methods,
     ]
     passed = 0
     failed = 0

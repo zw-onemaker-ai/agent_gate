@@ -6,6 +6,9 @@ Core design (extracted from 一人公司 v4.4.0):
   - Failed gate → oriented loopback (not always back to start)
   - Context packages are immutable snapshots for audit trail
   - Phase 1: llm_client for unified LLM calls + context_assembler for prompt building
+  - Phase 2: contract cross-verification + oriented loopback classification
+  - Phase 3: orchestrator generates config from NL descriptions
+  - Phase 4: tool_registry + CPOO scoring + memory persistence + pipeline doctor
 """
 
 import json
@@ -21,6 +24,8 @@ from .models import (
 from .validators import quality_gate_check, run_bash, cross_verify_contract
 from .llm_client import LLMClient, LLMResponse
 from .context_assembler import ContextAssembler, parse_contract_from_output
+from .tool_registry import ToolRegistry, get_registry
+from .cpoo_scorer import CPOOScorer
 
 
 class AgentGate:
@@ -44,6 +49,10 @@ class AgentGate:
         self.llm = LLMClient(provider=model_provider, model=model_name)
         self.assembler = ContextAssembler()
         self._upstream_contracts = []  # type: List[Contract] — accumulate across stages
+        # Phase 4: tool registry + CPOO scorer
+        self.tool_registry = get_registry()
+        self.cpoo_scorer = CPOOScorer(call_llm_fn=self._make_llm_call)
+        self._cpoo_warnings = []  # type: List[str]
 
     def register_agent(self, role, name, prompt_template="",
                        verify_cmd="", output_file="",
@@ -70,6 +79,17 @@ class AgentGate:
             "role_goal": role_goal,
             "scenario_type": scenario_type,
         }
+
+        # Phase 4: validate declared tools against whitelist
+        declared_tools = (
+            acceptance_criteria if isinstance(acceptance_criteria, list) and
+            all(isinstance(t, str) and t.startswith("@") for t in acceptance_criteria)
+            else []
+        )
+        if declared_tools:
+            errors = self.tool_registry.validate_agent_tools(declared_tools)
+            if errors:
+                print("  [TOOL_WARN] {}: {}".format(role, "; ".join(errors)))
 
     def _make_llm_call(self, system_prompt, user_prompt):
         # type: (str, str) -> str
@@ -152,6 +172,33 @@ class AgentGate:
             )
             agent["prompt_template"] = prompt_template
             print("  [AUTO] Prompt generated ({} chars)".format(len(prompt_template)))
+
+        # Phase 4: CPOO quality scoring on agent prompt
+        if agent.get("prompt_template"):
+            cpoo_result = self.cpoo_scorer.score(agent["prompt_template"])
+            if not cpoo_result.passed:
+                print("  [CPOO] Prompt score {}/100 — below threshold (80)".format(
+                    cpoo_result.total))
+                if cpoo_result.needs_regen:
+                    print("  [CPOO] Score < 60 — attempting auto-optimization...")
+                    optimized = self.cpoo_scorer.optimize(
+                        agent["prompt_template"],
+                        role_goal=agent.get("role_goal", ""),
+                        acceptance_criteria=agent.get("acceptance_criteria", []),
+                    )
+                    agent["prompt_template"] = optimized
+                    print("  [CPOO] Optimized prompt ({} chars)".format(len(optimized)))
+                self._cpoo_warnings.append(
+                    "{}: {}/100 — {}".format(
+                        role, cpoo_result.total,
+                        "; ".join(
+                            "{} ({}/20)".format(m.name, m.score)
+                            for m in cpoo_result.modules if m.score < 15
+                        )
+                    )
+                )
+            else:
+                print("  [CPOO] Prompt score {}/100 — OK".format(cpoo_result.total))
 
         # Phase 1: assemble context with upstream contracts
         assembled = self.assembler.build(
@@ -313,6 +360,14 @@ class AgentGate:
                 if self.state.loopback_count >= self.state.max_iterations:
                     print("\n[FATAL] Loopback limit ({}) exceeded.".format(
                         self.state.max_iterations))
+                    # Phase 4: run doctor diagnosis
+                    from .pipeline_doctor import PipelineDoctor
+                    doctor = PipelineDoctor(self)
+                    diagnosis = doctor.diagnose()
+                    print(diagnosis.summary)
+                    if diagnosis.can_auto_fix:
+                        print("  [DOCTOR] Auto-fix applied: {}".format(
+                            doctor.apply_fix(diagnosis)))
                     break
 
                 target = self._gate_history[-1].loopback_target
@@ -366,6 +421,12 @@ class AgentGate:
             print("  Stages: {} | Loopbacks: {}".format(
                 len(plan), self.state.loopback_count))
             print("=" * 50)
+
+        # Phase 4: CPOO warnings summary
+        if self._cpoo_warnings:
+            print("\n  [CPOO] Prompt quality warnings:")
+            for w in self._cpoo_warnings:
+                print("    - {}".format(w))
 
         return self.state
 
@@ -460,6 +521,30 @@ class AgentGate:
         else:
             print("     [!] No EXIT_CODE fingerprint!")
 
+    # ── Phase 4: Memory persistence ──
+
+    def save(self, memory_dir="pipeline_memory"):
+        # type: (str) -> str
+        """Save pipeline state to disk. Returns session_id."""
+        from .memory_manager import save_pipeline
+        return save_pipeline(self, memory_dir)
+
+    def load(self, session_id=None, project_name=None, memory_dir="pipeline_memory"):
+        # type: (str, str, str) -> dict
+        """Load a saved pipeline session from disk."""
+        from .memory_manager import load_pipeline
+        return load_pipeline(session_id, project_name, memory_dir)
+
+    # ── Phase 4: Pipeline Doctor ──
+
+    def diagnose(self):
+        # type: () -> object
+        """Run pipeline doctor diagnosis."""
+        from .pipeline_doctor import PipelineDoctor
+        return PipelineDoctor(self).diagnose()
+
+    # ── Summary ──
+
     def summary(self):
         # type: () -> str
         lines = [
@@ -474,4 +559,9 @@ class AgentGate:
         for i, g in enumerate(self._gate_history):
             lines.append("  Step {}: {} | Loopback->{}".format(
                 i + 1, g.status.value, g.loopback_target.value))
+        if self._cpoo_warnings:
+            lines.append("")
+            lines.append("CPOO Warnings:")
+            for w in self._cpoo_warnings:
+                lines.append("  - {}".format(w))
         return "\n".join(lines)
