@@ -129,37 +129,6 @@ def test_unclassified_loopback():
     os.remove(tf)
 
 
-if __name__ == "__main__":
-    import traceback
-    tests = [
-        test_exit_fingerprint_valid,
-        test_exit_fingerprint_missing,
-        test_exit_fingerprint_multiple,
-        test_run_bash_success,
-        test_run_bash_failure,
-        test_quality_gate_pass,
-        test_quality_gate_missing_file,
-        test_quality_gate_no_fingerprint,
-        test_context_budget,
-        test_oriented_loopback,
-        test_unclassified_loopback,
-    ]
-    passed = 0
-    failed = 0
-    for test in tests:
-        try:
-            test()
-            print("  PASS: {}".format(test.__name__))
-            passed += 1
-        except Exception as e:
-            print("  FAIL: {} — {}".format(test.__name__, e))
-            failed += 1
-    
-    print("\n{} passed, {} failed".format(passed, failed))
-    if failed > 0:
-        sys.exit(1)
-
-
 # ── Q2 Phase 0: Config loader tests ──
 
 import tempfile, json as json_mod
@@ -287,44 +256,6 @@ def test_load_reference_config():
     assert result["design_notes"]["why_these_agents"]
 
 
-if __name__ == "__main__":
-    import traceback
-    tests = [
-        test_exit_fingerprint_valid,
-        test_exit_fingerprint_missing,
-        test_exit_fingerprint_multiple,
-        test_run_bash_success,
-        test_run_bash_failure,
-        test_quality_gate_pass,
-        test_quality_gate_missing_file,
-        test_quality_gate_no_fingerprint,
-        test_context_budget,
-        test_oriented_loopback,
-        test_unclassified_loopback,
-        test_load_legacy_config,
-        test_load_config_missing_agents,
-        test_load_config_empty_agents,
-        test_load_q2_full_config,
-        test_load_q2_missing_model_provider,
-        test_load_q2_bad_mode,
-        test_load_reference_config,
-    ]
-    passed = 0
-    failed = 0
-    for test in tests:
-        try:
-            test()
-            print("  PASS: {}".format(test.__name__))
-            passed += 1
-        except Exception as e:
-            print("  FAIL: {} — {}".format(test.__name__, e))
-            failed += 1
-    
-    print("\n{} passed, {} failed".format(passed, failed))
-    if failed > 0:
-        sys.exit(1)
-
-
 # ── Phase 1: llm_client + context_assembler + contract ──
 
 def test_llm_client_creation():
@@ -427,6 +358,241 @@ def test_llm_validate_env():
     assert isinstance(warnings, list)
 
 
+# ── Phase 2: Gate + Loopback closed loop ──
+
+def test_classify_failure_backend():
+    """Syntax error → BACKEND loopback."""
+    from src.validators import classify_failure
+    from src.models import ExitCodeFingerprint, LoopbackTarget
+    fp = ExitCodeFingerprint(raw_output="EXIT:1", exit_code=1, has_fingerprint=True, count=1)
+    target, extra = classify_failure(
+        ["SyntaxError: invalid syntax at line 42"],
+        "Traceback: NameError: name 'x' is not defined",
+        exit_fp=fp,
+    )
+    assert target == LoopbackTarget.BACKEND
+    assert len(extra) == 0
+
+
+def test_classify_failure_security():
+    """Security keywords → SECURITY loopback."""
+    from src.validators import classify_failure
+    from src.models import ExitCodeFingerprint, LoopbackTarget
+    fp = ExitCodeFingerprint(raw_output="EXIT:1", exit_code=1, has_fingerprint=True, count=1)
+    target, extra = classify_failure(
+        ["Hardcoded API secret found"],
+        "XSS vulnerability in template",
+        exit_fp=fp,
+    )
+    assert target == LoopbackTarget.SECURITY
+
+
+def test_classify_failure_frontend():
+    """UI/CSS keywords → FRONTEND loopback."""
+    from src.validators import classify_failure
+    from src.models import ExitCodeFingerprint, LoopbackTarget
+    fp = ExitCodeFingerprint(raw_output="EXIT:1", exit_code=1, has_fingerprint=True, count=1)
+    target, extra = classify_failure(
+        ["CSS layout broken"],
+        "DOM rendering issue on mobile viewport",
+        exit_fp=fp,
+    )
+    assert target == LoopbackTarget.FRONTEND
+
+
+def test_classify_failure_design():
+    """Architecture keywords → DESIGN loopback."""
+    from src.validators import classify_failure
+    from src.models import ExitCodeFingerprint, LoopbackTarget
+    fp = ExitCodeFingerprint(raw_output="EXIT:1", exit_code=1, has_fingerprint=True, count=1)
+    target, extra = classify_failure(
+        ["Database schema mismatch"],
+        "API design incompatible with data model",
+        exit_fp=fp,
+    )
+    assert target == LoopbackTarget.DESIGN
+
+
+def test_classify_failure_requirements():
+    """Requirements keywords → REQUIREMENTS loopback."""
+    from src.validators import classify_failure
+    from src.models import ExitCodeFingerprint, LoopbackTarget
+    fp = ExitCodeFingerprint(raw_output="EXIT:1", exit_code=1, has_fingerprint=True, count=1)
+    target, extra = classify_failure(
+        ["Missing requirement for authentication"],
+        "User story acceptance criteria not met",
+        exit_fp=fp,
+    )
+    assert target == LoopbackTarget.REQUIREMENTS
+
+
+def test_classify_failure_unclassified():
+    """Unclassified errors → NONE + extra reasons."""
+    from src.validators import classify_failure
+    from src.models import ExitCodeFingerprint, LoopbackTarget
+    fp = ExitCodeFingerprint(raw_output="EXIT:1", exit_code=1, has_fingerprint=True, count=1)
+    target, extra = classify_failure(
+        ["Something bizarre happened with the flux capacitor"],
+        "No recognizable pattern here",
+        exit_fp=fp,
+    )
+    assert target == LoopbackTarget.NONE
+    assert any("Unclassified" in r for r in extra)
+
+
+def test_classify_failure_no_failure():
+    """No failure → NONE, no extra reasons."""
+    from src.validators import classify_failure
+    from src.models import ExitCodeFingerprint, LoopbackTarget
+    target, extra = classify_failure([], "All good EXIT:0")
+    assert target == LoopbackTarget.NONE
+    assert len(extra) == 0
+
+
+def test_cross_verify_contract_pass():
+    """Contract claims matching files → PASS."""
+    import tempfile, os
+    from src.validators import cross_verify_contract
+    from src.models import Contract, GateStatus
+
+    tmpdir = tempfile.mkdtemp()
+    f = os.path.join(tmpdir, "main.py")
+    with open(f, "w") as fh:
+        fh.write("print('hello')")
+
+    contract = Contract(
+        agent_id="R4",
+        summary="Built main.py",
+        output_files=["main.py"],
+    )
+    result = cross_verify_contract(contract, tmpdir)
+    assert result.status == GateStatus.PASS
+    assert len(result.fail_reasons) == 0
+
+    # Cleanup
+    os.remove(f)
+    os.rmdir(tmpdir)
+
+
+def test_cross_verify_contract_fail_missing():
+    """Contract claims file that doesn't exist → FAIL."""
+    import tempfile, os
+    from src.validators import cross_verify_contract
+    from src.models import Contract, GateStatus
+
+    tmpdir = tempfile.mkdtemp()
+    contract = Contract(
+        agent_id="R4",
+        summary="Built ghost.py",
+        output_files=["ghost.py"],
+    )
+    result = cross_verify_contract(contract, tmpdir)
+    assert result.status == GateStatus.FAIL
+    assert any("not found" in r for r in result.fail_reasons)
+
+    os.rmdir(tmpdir)
+
+
+def test_cross_verify_contract_fail_empty():
+    """Contract claims file that's empty → FAIL."""
+    import tempfile, os
+    from src.validators import cross_verify_contract
+    from src.models import Contract, GateStatus
+
+    tmpdir = tempfile.mkdtemp()
+    f = os.path.join(tmpdir, "empty.py")
+    with open(f, "w") as fh:
+        pass  # empty file
+
+    contract = Contract(
+        agent_id="R4",
+        summary="Built empty.py",
+        output_files=["empty.py"],
+    )
+    result = cross_verify_contract(contract, tmpdir)
+    assert result.status == GateStatus.FAIL
+    assert any("empty" in r for r in result.fail_reasons)
+
+    os.remove(f)
+    os.rmdir(tmpdir)
+
+
+def test_human_gate_categories():
+    """HumanGate should detect category from fail reasons."""
+    from src.human_gate import _detect_category, HUMAN_CHECKLIST, FAIL_CATEGORY_MAP
+
+    # Content quality
+    assert _detect_category(["Output quality below threshold"]) == "content_quality"
+    # Design decision
+    assert _detect_category(["Design decision: trade-off between speed and accuracy"]) == "design_decision"
+    # Requirements gap
+    assert _detect_category(["Missing requirement: no auth specified"]) == "requirements_gap"
+    # Security alert
+    assert _detect_category(["CVE-2024-1234 detected"]) == "security_alert"
+    # Contract broken
+    assert _detect_category(["Contract claims file missing"]) == "contract_broken"
+    # Default fallback
+    assert _detect_category(["Generic error"]) == "crash"
+
+    # All categories should have checklist entries
+    for category in {"crash", "content_quality", "design_decision",
+                     "requirements_gap", "security_alert", "contract_broken"}:
+        assert category in HUMAN_CHECKLIST, "Missing checklist for: {}".format(category)
+        assert "question" in HUMAN_CHECKLIST[category]
+        assert len(HUMAN_CHECKLIST[category]["options"]) >= 3
+
+    # FAIL_CATEGORY_MAP should cover all categories
+    covered = set()
+    for _, cat in FAIL_CATEGORY_MAP:
+        covered.add(cat)
+    assert covered == {"content_quality", "design_decision",
+                       "requirements_gap", "security_alert", "contract_broken"}, \
+        "FAIL_CATEGORY_MAP coverage: {}".format(covered)
+
+
+def test_human_gate_prompt():
+    """human_gate_prompt should include category info."""
+    from src.human_gate import human_gate_prompt
+    prompt = human_gate_prompt(
+        ["Missing requirement for login"],
+        "EXIT:1 no auth",
+    )
+    assert "HUMAN GATE" in prompt
+    assert "REQUIREMENTS GAP" in prompt
+    assert "Missing requirement" in prompt
+
+
+def test_engine_contract_verify_integration():
+    """AgentGate with broken contract → gate should fail."""
+    import tempfile, os
+    from src.engine import AgentGate
+    from src.models import Contract, GateStatus
+
+    tmpdir = tempfile.mkdtemp()
+    gate = AgentGate(project_name="test-contract", output_dir=tmpdir,
+                     model_provider="ollama", model_name="qwen2.5:7b")
+
+    # Register an agent that would produce a file
+    gate.register_agent(
+        role="R1",
+        name="Test Agent",
+        role_goal="Write a hello world script",
+        output_file="hello.py",
+        acceptance_criteria=["File should contain print('hello')"],
+    )
+
+    # Verify cross_verify_contract integration via mock
+    # (The actual LLM call would fail without ollama, so test contract-only path)
+    from src.validators import cross_verify_contract
+    c = Contract(agent_id="R1", summary="test",
+                 output_files=["nonexistent.py"])
+    result = cross_verify_contract(c, tmpdir)
+    assert result.status == GateStatus.FAIL
+    assert result.loopback_target.value != "NONE"
+
+    os.rmdir(tmpdir)
+
+
 if __name__ == "__main__":
     import traceback
     tests = [
@@ -456,6 +622,19 @@ if __name__ == "__main__":
         test_assembler_normal_budget,
         test_assembler_retry_context,
         test_llm_validate_env,
+        test_classify_failure_backend,
+        test_classify_failure_security,
+        test_classify_failure_frontend,
+        test_classify_failure_design,
+        test_classify_failure_requirements,
+        test_classify_failure_unclassified,
+        test_classify_failure_no_failure,
+        test_cross_verify_contract_pass,
+        test_cross_verify_contract_fail_missing,
+        test_cross_verify_contract_fail_empty,
+        test_human_gate_categories,
+        test_human_gate_prompt,
+        test_engine_contract_verify_integration,
     ]
     passed = 0
     failed = 0

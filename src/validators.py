@@ -1,4 +1,4 @@
-"""Validators — Bash verification, EXIT fingerprint, file checks."""
+"""Validators — Bash verification, EXIT fingerprint, file checks, loopback classification."""
 
 import json
 import os
@@ -7,7 +7,10 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Tuple
 
-from .models import ExitCodeFingerprint, GateStatus, QualityGateResult, LoopbackTarget
+from .models import (
+    ExitCodeFingerprint, GateStatus, QualityGateResult, LoopbackTarget,
+    Contract,
+)
 
 
 def bash_verify_files(file_paths, check_syntax=True):
@@ -94,28 +97,13 @@ def quality_gate_check(role, part_a_files, verification_output, check_desensitiz
 
     status = GateStatus.FAIL if fail_reasons else GateStatus.PASS
 
-    # Oriented loopback: check both fail_reasons AND verification output
-    loopback = LoopbackTarget.NONE
-    combined = " ".join(fail_reasons) + " " + verification_output
-    if status == GateStatus.FAIL or exit_fp.exit_code != 0:
-        if re.search(r"(syntax|error|bug|crash|traceback)", combined, re.I):
-            loopback = LoopbackTarget.BACKEND
-        elif re.search(r"(security|xss|injection|csrf)", combined, re.I):
-            loopback = LoopbackTarget.SECURITY
-        elif re.search(r"(html|css|ui|layout|frontend)", combined, re.I):
-            loopback = LoopbackTarget.FRONTEND
-        elif re.search(r"(design|architecture|schema|model)", combined, re.I):
-            loopback = LoopbackTarget.DESIGN
-        else:
-            # Unclassified failure — escalate, don't guess
-            loopback = LoopbackTarget.NONE
-            fail_reasons.append(
-                "Unclassified failure: unable to determine loopback target. "
-                "Reviewing agent should analyze the error and suggest target."
-            )
+    # Oriented loopback classification (delegated to standalone function)
+    loopback, extra_reasons = classify_failure(fail_reasons, verification_output, exit_fp)
+    fail_reasons.extend(extra_reasons)
 
     # If NONE but gate failed, escalate to human
     if loopback == LoopbackTarget.NONE and status == GateStatus.FAIL:
+        combined = " ".join(fail_reasons) + " " + verification_output
         fail_reasons.append(
             "[HUMAN_GATE] No automatic loopback target matched. "
             "Error context: {}".format(combined[:200])
@@ -145,3 +133,117 @@ def check_context_budget(total_bytes):
     elif total_bytes <= 15360:
         return "CTX_WARNING"
     return "CTX_CRITICAL"
+
+
+# ── Phase 2: Oriented loopback classification ──
+
+# Error pattern → loopback target mapping (order matters: first match wins)
+LOOPBACK_PATTERNS = [
+    # Code-level errors → BACKEND
+    (r"(syntax\s*error|traceback|NameError|TypeError|ValueError|"
+     r"AttributeError|ImportError|IndentationError|bug\b|crash|"
+     r"compile\s*fail|undefined\s+variable|not\s+defined)",
+     LoopbackTarget.BACKEND),
+    # Security issues → SECURITY
+    (r"(security|xss\b|injection|csrf\b|owasp|vulnerability|"
+     r"hardcoded\s*(secret|token|password|key)|cve-\d)",
+     LoopbackTarget.SECURITY),
+    # Frontend/UI issues → FRONTEND
+    (r"(html|css\b|ui\b|layout|frontend|dom\b|responsive|"
+     r"viewport|styling|component\s*render)",
+     LoopbackTarget.FRONTEND),
+    # Architecture/design issues → DESIGN
+    (r"(design|architecture|schema\b|model\b|database|"
+     r"api\s*design|data\s*model|interface\s*contract)",
+     LoopbackTarget.DESIGN),
+    # Requirements issues → REQUIREMENTS
+    (r"(requirement|specification|acceptance\s*criteria|"
+     r"user\s*story|scope|missing\s*requirement)",
+     LoopbackTarget.REQUIREMENTS),
+]
+
+
+def classify_failure(fail_reasons, verification_output, exit_fp=None):
+    # type: (List[str], str, Optional[ExitCodeFingerprint]) -> Tuple[LoopbackTarget, List[str]]
+    """Classify a gate failure to determine the correct loopback target.
+
+    Phase 2: Extracted from quality_gate_check into standalone function
+    for reuse by engine, human_gate, and pipeline doctor.
+
+    Returns:
+        (LoopbackTarget, extra_fail_reasons) — extra reasons added for
+        unclassified or edge cases.
+    """
+    extra_reasons = []
+    combined = " ".join(fail_reasons) + " " + verification_output
+
+    # Only classify if there's an actual failure
+    has_failure = bool(fail_reasons)
+    if exit_fp and exit_fp.exit_code != 0:
+        has_failure = True
+
+    if not has_failure:
+        return LoopbackTarget.NONE, extra_reasons
+
+    for pattern, target in LOOPBACK_PATTERNS:
+        if re.search(pattern, combined, re.I):
+            return target, extra_reasons
+
+    # Unclassified — escalate to human
+    extra_reasons.append(
+        "Unclassified failure: unable to determine loopback target from "
+        "error patterns. Manual review needed."
+    )
+    return LoopbackTarget.NONE, extra_reasons
+
+
+# ── Phase 2: Contract cross-verification ──
+
+def cross_verify_contract(contract, output_dir, check_endpoints=True):
+    # type: (Contract, str, bool) -> QualityGateResult
+    """Cross-verify a Contract's claims against actual files/endpoints.
+
+    Step 0.6 of the anti-hallucination protocol: if an agent claims it
+    produced certain files or API endpoints, verify those claims are real.
+
+    Returns a QualityGateResult — PASS if all claims verified, FAIL otherwise.
+    """
+    checks = []
+    fail_reasons = []
+    od = Path(output_dir)
+
+    # Verify claimed files exist
+    if contract.output_files:
+        for f in contract.output_files:
+            fp = od / f
+            exists = fp.exists()
+            non_empty = exists and fp.stat().st_size > 0
+            checks.append({
+                "name": "contract_file:{}".format(f),
+                "status": "PASS" if (exists and non_empty) else "FAIL",
+            })
+            if not exists:
+                fail_reasons.append(
+                    "Contract claims file '{}' — not found in {}".format(f, output_dir))
+            elif not non_empty:
+                fail_reasons.append(
+                    "Contract claims file '{}' — exists but is empty".format(f))
+
+    # Verify claimed endpoints are reachable (basic check)
+    if check_endpoints and contract.endpoints:
+        for ep in contract.endpoints:
+            method = ep.get("method", "GET")
+            path = ep.get("path", "/")
+            checks.append({
+                "name": "contract_endpoint:{} {}".format(method, path),
+                "status": "SKIPPED",  # Can't actually curl without running service
+                "detail": "Endpoint declared — verify manually after deployment",
+            })
+
+    status = GateStatus.FAIL if fail_reasons else GateStatus.PASS
+    return QualityGateResult(
+        status=status,
+        checks=checks,
+        fail_reasons=fail_reasons,
+        loopback_target=LoopbackTarget.NONE if status == GateStatus.PASS else LoopbackTarget.BACKEND,
+    )

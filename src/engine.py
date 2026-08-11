@@ -18,7 +18,7 @@ from .models import (
     AgentOutput, ContextPackage, Contract, GateStatus, LoopbackTarget,
     PipelineState, QualityGateResult,
 )
-from .validators import quality_gate_check, run_bash
+from .validators import quality_gate_check, run_bash, cross_verify_contract
 from .llm_client import LLMClient, LLMResponse
 from .context_assembler import ContextAssembler, parse_contract_from_output
 
@@ -221,6 +221,17 @@ class AgentGate:
                 output_files=part_a_files,
             )
 
+        # Phase 2: cross-verify contract claims against actual files
+        if contract.output_files and gate_result.status in (GateStatus.PASS, GateStatus.CONDITIONAL):
+            cv_result = cross_verify_contract(
+                contract, str(self.output_dir), check_endpoints=False)
+            if cv_result.status == GateStatus.FAIL:
+                print("  [CONTRACT_VERIFY] FAIL — contract claims don't match output")
+                gate_result.status = GateStatus.FAIL
+                gate_result.fail_reasons.extend(cv_result.fail_reasons)
+                gate_result.checks.extend(cv_result.checks)
+                gate_result.loopback_target = cv_result.loopback_target
+
         agent_output = AgentOutput(
             role=role,
             role_name=agent["name"],
@@ -321,10 +332,26 @@ class AgentGate:
                 target_stage = self._find_stage_for_role(plan, target.value)
                 if target_stage is not None:
                     stage_idx = target_stage
+                    # Phase 2: trim upstream contracts beyond target stage
+                    # so the retry doesn't see its own failed output
+                    target_roles_before = set()
+                    for s in plan[:target_stage + 1]:
+                        target_roles_before.update(s["roles"])
+                    self._upstream_contracts = [
+                        c for c in self._upstream_contracts
+                        if c.agent_id in target_roles_before
+                    ]
                 else:
                     stage_idx = 0  # Fallback: restart from beginning
-                context = "[LOOPBACK] {}".format(
-                    ", ".join(self._gate_history[-1].fail_reasons))
+                    self._upstream_contracts = []
+
+                # Phase 2: pass both failure context AND surviving upstream context
+                upstream_summary = " | ".join(
+                    c.summary for c in self._upstream_contracts if c.summary)
+                context = "[LOOPBACK] FAIL: {}\n[CONTEXT] Upstream: {}".format(
+                    ", ".join(self._gate_history[-1].fail_reasons),
+                    upstream_summary or "(none)",
+                )
                 continue
 
             # All passed — advance to next stage
