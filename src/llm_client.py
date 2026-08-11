@@ -32,20 +32,33 @@ class LLMClient:
     Provider + model resolved from config.models.registry.
     """
 
-    def __init__(self, provider="ollama", model="qwen2.5:7b"):
+    def __init__(self, provider="ollama", model="qwen2.5:7b", base_url=None, api_key=None):
         self.provider = provider
         self.model = model
+        self.base_url = base_url
+        self.api_key = api_key
 
-    def call(self, system_prompt, user_prompt="", provider=None, model=None):
-        # type: (str, str, str, str) -> LLMResponse
-        """Make a single LLM call. Returns LLMResponse."""
+    def call(self, system_prompt, user_prompt="", provider=None, model=None,
+             base_url=None, api_key=None):
+        # type: (str, str, str, str, str, str) -> LLMResponse
+        """Make a single LLM call. Returns LLMResponse.
+
+        Args:
+            provider: Override default provider (ollama/openai/litellm).
+            model: Override default model name.
+            base_url: Override API base URL (for OpenAI-compatible endpoints).
+            api_key: Override API key.
+        """
         p = provider or self.provider
         m = model or self.model
+        url = base_url or self.base_url
+        key = api_key or self.api_key
 
         if p == "ollama":
             return self._call_ollama(m, system_prompt, user_prompt)
         elif p in ("openai", "litellm"):
-            return self._call_litellm(m, system_prompt, user_prompt)
+            return self._call_litellm(m, system_prompt, user_prompt,
+                                       base_url=url, api_key=key)
         else:
             return LLMResponse(
                 content="", provider=p, model=m,
@@ -82,17 +95,22 @@ class LLMClient:
                 content="", model=model, provider="ollama",
                 error="OLLAMA_ERROR: {}".format(e))
 
-    def _call_litellm(self, model, system, user):
-        # type: (str, str, str) -> LLMResponse
+    def _call_litellm(self, model, system, user, base_url=None, api_key=None):
+        # type: (str, str, str, str, str) -> LLMResponse
         try:
             from litellm import completion
-            resp = completion(
-                model=model,
-                messages=[
+            kwargs = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user or "Proceed with your task."},
                 ],
-            )
+            }
+            if base_url:
+                kwargs["api_base"] = base_url
+            if api_key:
+                kwargs["api_key"] = api_key
+            resp = completion(**kwargs)
             return LLMResponse(
                 content=resp.choices[0].message.content,
                 model=model, provider="litellm",

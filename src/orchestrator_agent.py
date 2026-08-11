@@ -25,18 +25,25 @@ Your job: given a project description in natural language, design a complete
 agent pipeline configuration in JSON format.
 
 ## Role Library (standard agent roles)
-| Role | Name        | Typical Responsibility |
-|------|------------|----------------------|
-| R1   | 需求分析    | Requirements analysis, user stories, acceptance criteria |
-| R2   | 产品设计    | Product spec, MVP scope, feature prioritization |
-| R3   | 技术架构    | System architecture, tech stack, data modeling |
-| R4   | 后端开发    | Backend implementation (API, database, business logic) |
-| R5   | 前端开发    | Frontend implementation (UI, components, pages) |
-| R6   | 安全审计    | Security audit, vulnerability scanning |
-| R7   | 测试验证    | Integration tests, E2E testing |
-| R8   | DevOps      | Deployment, CI/CD, containerization |
-| R9   | 文档撰写    | Documentation, README, API docs |
-| R10  | 代码审查    | Code review, quality analysis |
+| Role | Name        | Typical Responsibility             | Model Tier |
+|------|------------|-----------------------------------|------------|
+| R1   | 需求分析    | Requirements analysis, user stories| cheap      |
+| R2   | 产品设计    | Product spec, MVP scope           | cheap      |
+| R3   | 技术架构    | System architecture, data modeling | cheap      |
+| R4   | 后端开发    | Backend implementation (API, DB)   | powerful   |
+| R5   | 前端开发    | Frontend implementation (UI)       | powerful   |
+| R6   | 安全审计    | Security audit, vulnerability scan | balanced   |
+| R7   | 测试验证    | Integration tests, E2E testing     | balanced   |
+| R8   | DevOps      | Deployment, CI/CD                  | balanced   |
+| R9   | 文档撰写    | Documentation, README              | cheap      |
+| R10  | 代码审查    | Code review, quality analysis      | cheap      |
+
+## Multi-Model Strategy (cost-aware)
+When a provider offers multiple models (e.g., 百炼: qwen-turbo/plus/max/coder-plus):
+- R1,R2,R3,R9,R10 → cheapest model (requirements/design/docs are light tasks)
+- R4,R5 → most powerful code model (code generation needs quality)
+- R6,R7,R8 → balanced model (security/testing/devops need reliability)
+Add "model" field to each agent entry specifying which model to use.
 
 ## Scenario Types
 - "code_gen": write code files
@@ -49,34 +56,20 @@ You MUST output ONLY valid JSON — no markdown fences, no explanations.
 
 {
   "meta": {"project": "...", "version": "1.0", "description": "..."},
-  "models": {"default": "qwen2.5:7b", "registry": {}},
+  "providers": {},
+  "models": {"default": "...", "registry": {}},
   "agents": [
     {
       "role": "R1",
       "name": "...",
+      "model": "qwen-turbo",
       "role_goal": "1-2 sentences describing what this agent does",
-      "output_file": "path/to/output.md",
-      "acceptance_criteria": ["criterion 1", "criterion 2"],
-      "scenario_type": "code_gen",
-      "declared_tools": ["@write_file", "@read_file"]
+      ...
     }
   ],
-  "topology": {
-    "stages": [
-      {"stage": 1, "agents": ["R1"], "mode": "serial", "max_retries": 3},
-      {"stage": 2, "agents": ["R2"], "mode": "serial", "max_retries": 3, "on_fail": "R1"}
-    ]
-  },
-  "context": {
-    "routes": [
-      {"from": "R1", "to": "R2", "files": ["requirements.md"]}
-    ]
-  },
-  "design_notes": {
-    "why_these_agents": "1-2 sentence rationale",
-    "gaps_found": ["any missing roles or capabilities"],
-    "risks": ["potential failure modes or concerns"]
-  }
+  "topology": {...},
+  "context": {"routes": [...]},
+  "design_notes": {...}
 }
 
 ## Design Rules
@@ -88,6 +81,7 @@ You MUST output ONLY valid JSON — no markdown fences, no explanations.
 6. MAX 5 agents unless the project genuinely needs more
 7. Every agent's output_file must be unique
 8. Acceptance criteria must be verifiable (file exists, contains X, etc.)
+9. When provider has multiple models, assign cheap models to R1-R3,R9-R10 and powerful models to R4-R5
 """
 
 ORCHESTRATOR_USER = """Design a pipeline config for the following project:

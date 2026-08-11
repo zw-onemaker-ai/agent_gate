@@ -170,6 +170,7 @@ def build_pipeline(config, provider="ollama", model="qwen2.5:7b", output_dir=Non
 
     Q2 Phase 0: Reads topology from config.topology.stages (new format)
     or config.pipeline.stages (legacy format).
+    v1.1: Reads providers section for base_url + api_key per provider.
     """
     # ── Project name ──
     meta = config.get("meta", {})
@@ -191,6 +192,17 @@ def build_pipeline(config, provider="ollama", model="qwen2.5:7b", output_dir=Non
         provider = entry.get("provider", provider)
         model = entry.get("model", model)
 
+    # ── v1.1: Provider config (base_url, api_key) ──
+    providers_cfg = config.get("providers", {})
+    provider_cfg = providers_cfg.get(provider, {})
+    gate_base_url = provider_cfg.get("base_url") or config.get("api_base")
+    gate_api_key = provider_cfg.get("api_key") or config.get("api_key")
+
+    # Resolve env vars in api_key (e.g., "${DASHSCOPE_API_KEY}")
+    import os as _os
+    if gate_api_key and gate_api_key.startswith("${") and gate_api_key.endswith("}"):
+        gate_api_key = _os.environ.get(gate_api_key[2:-1], gate_api_key)
+
     gate = AgentGate(
         project_name=name,
         output_dir=output_dir,
@@ -198,6 +210,11 @@ def build_pipeline(config, provider="ollama", model="qwen2.5:7b", output_dir=Non
         model_provider=provider,
         model_name=model,
     )
+    # Inject provider config into gate's LLM client
+    if gate_base_url:
+        gate.llm.base_url = gate_base_url
+    if gate_api_key:
+        gate.llm.api_key = gate_api_key
 
     for agent_cfg in config["agents"]:
         # Agent-level model override (Q2)

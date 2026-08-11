@@ -906,6 +906,77 @@ def test_engine_memory_methods():
     assert hasattr(gate, 'diagnose')
 
 
+# ── v1.1: Multi-model provider (百炼 / OpenAI-compatible) ──
+
+def test_llm_client_base_url():
+    """LLMClient should accept and store base_url."""
+    from src.llm_client import LLMClient
+    c = LLMClient(
+        provider="litellm",
+        model="qwen-turbo",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key="sk-test",
+    )
+    assert c.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert c.api_key == "sk-test"
+
+def test_config_providers_section():
+    """Config with providers section should set base_url on LLM client."""
+    from src.config_loader import build_pipeline
+    config = {
+        "meta": {"project": "test_providers"},
+        "providers": {
+            "litellm": {
+                "base_url": "https://api.example.com/v1",
+                "api_key": "sk-fake",
+            }
+        },
+        "models": {
+            "default": "qwen-turbo",
+            "registry": {
+                "qwen-turbo": {"provider": "litellm", "model": "qwen-turbo"},
+            },
+        },
+        "agents": [
+            {"role": "R1", "name": "Test", "role_goal": "test",
+             "model": "qwen-turbo", "output_file": "out.md"},
+        ],
+    }
+    result = build_pipeline(config, provider="litellm", model="qwen-turbo")
+    gate = result["gate"]
+    assert gate.llm.base_url == "https://api.example.com/v1"
+    assert gate.llm.api_key == "sk-fake"
+
+def test_bailian_config_loads():
+    """q2_bailian.json should load and validate."""
+    from src.config_loader import load_config
+    import os
+    ref_path = os.path.join(
+        os.path.dirname(__file__), "..", "configs", "q2_bailian.json")
+    result = load_config(ref_path)
+    assert "providers" in result
+    assert result["providers"]["litellm"]["base_url"]
+    assert result["models"]["registry"]["qwen-coder-plus"]["model"]
+    # Check per-agent model assignments
+    models = {a["role"]: a.get("model", "") for a in result["agents"]}
+    assert models.get("R1") == "qwen-turbo"      # cheap for requirements
+    assert models.get("R4") == "qwen-coder-plus"  # powerful for code
+
+def test_orchestrator_multi_model_template():
+    """Template configs should support per-agent model field."""
+    from src.orchestrator_agent import generate_pipeline_config, expand_prompts
+    config = generate_pipeline_config(
+        "Build a REST API with 百炼 multi-model support",
+        use_llm=False,
+    )
+    # web_api template agents should exist
+    assert len(config["agents"]) >= 2
+    # Each agent should have role and role_goal
+    for agent in config["agents"]:
+        assert "role" in agent
+        assert "role_goal" in agent
+
+
 # ── Test runner ──
 
 if __name__ == "__main__":
@@ -978,6 +1049,10 @@ if __name__ == "__main__":
         test_pipeline_doctor_has_summary,
         test_engine_cpoo_integration,
         test_engine_memory_methods,
+        test_llm_client_base_url,
+        test_config_providers_section,
+        test_bailian_config_loads,
+        test_orchestrator_multi_model_template,
     ]
     passed = 0
     failed = 0

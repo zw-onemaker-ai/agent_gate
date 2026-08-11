@@ -1,0 +1,81 @@
+{
+  "meta": {
+    "project": "Todo_API_Bailian",
+    "version": "1.1",
+    "description": "百炼(DashScope)单API多模型 — Design Brain自动分配模型给不同Agent"
+  },
+  "providers": {
+    "litellm": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "${DASHSCOPE_API_KEY}"
+    }
+  },
+  "models": {
+    "default": "qwen-turbo",
+    "registry": {
+      "qwen-turbo": {"provider": "litellm", "model": "qwen-turbo"},
+      "qwen-plus": {"provider": "litellm", "model": "qwen-plus"},
+      "qwen-max": {"provider": "litellm", "model": "qwen-max"},
+      "qwen-coder-plus": {"provider": "litellm", "model": "qwen-coder-plus"}
+    },
+    "strategy": {
+      "mode": "cost_aware",
+      "rules": [
+        {"role_pattern": "R[1-3]", "model": "qwen-turbo", "reason": "需求/设计/架构 — 便宜够用"},
+        {"role_pattern": "R[4-5]", "model": "qwen-coder-plus", "reason": "后端/前端 — 代码质量优先"},
+        {"role_pattern": "R[6-8]", "model": "qwen-plus", "reason": "安全/测试/DevOps — 平衡"},
+        {"role_pattern": "R[9-10]", "model": "qwen-turbo", "reason": "文档/审查 — 轻量即可"}
+      ]
+    }
+  },
+  "agents": [
+    {
+      "role": "R1",
+      "name": "需求分析",
+      "model": "qwen-turbo",
+      "role_goal": "分析用户需求，产出 requirements.md，含3+用户故事和验收标准",
+      "output_file": "requirements.md",
+      "acceptance_criteria": ["含至少3个用户故事", "每个故事含验收标准"],
+      "scenario_type": "code_gen",
+      "declared_tools": ["@web_search", "@read_file"]
+    },
+    {
+      "role": "R2",
+      "name": "产品设计",
+      "model": "qwen-turbo",
+      "role_goal": "基于需求产出产品规格说明书，定义MVP功能和优先级",
+      "output_file": "product_spec.md",
+      "acceptance_criteria": ["含功能清单与优先级标注", "MVP范围明确定义"],
+      "scenario_type": "code_gen",
+      "declared_tools": ["@read_file"]
+    },
+    {
+      "role": "R4",
+      "name": "后端开发",
+      "model": "qwen-coder-plus",
+      "role_goal": "开发FastAPI Todo后端，含CRUD端点和健康检查",
+      "output_file": "backend/main.py",
+      "acceptance_criteria": ["GET /todos 返回200", "POST /todos 创建并返回201"],
+      "scenario_type": "code_gen",
+      "declared_tools": ["@write_file", "@run_bash"]
+    }
+  ],
+  "topology": {
+    "stages": [
+      {"stage": 1, "agents": ["R1"], "mode": "serial", "max_retries": 3},
+      {"stage": 2, "agents": ["R2"], "mode": "serial", "max_retries": 3, "on_fail": "R1"},
+      {"stage": 3, "agents": ["R4"], "mode": "serial", "max_retries": 3, "on_fail": "R2"}
+    ]
+  },
+  "context": {
+    "routes": [
+      {"from": "R1", "to": "R2", "files": ["requirements.md"]},
+      {"from": "R2", "to": "R4", "files": ["product_spec.md", "requirements.md"]}
+    ]
+  },
+  "design_notes": {
+    "why_these_agents": "3-agent串行管线，利用百炼多模型：R1/R2用turbo省钱，R4用coder-plus保证代码质量",
+    "gaps_found": ["缺少前端(R5)"],
+    "risks": ["百炼API QPS限制可能影响并行场景"]
+  }
+}
