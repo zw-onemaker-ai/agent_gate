@@ -158,3 +158,168 @@ if __name__ == "__main__":
     print("\n{} passed, {} failed".format(passed, failed))
     if failed > 0:
         sys.exit(1)
+
+
+# ── Q2 Phase 0: Config loader tests ──
+
+import tempfile, json as json_mod
+
+def _write_temp_config(data):
+    """Helper: write a dict as a temp JSON config file."""
+    tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    json_mod.dump(data, tf)
+    tf.close()
+    return tf.name
+
+def test_load_legacy_config():
+    """Legacy config (project+agents only) should still load."""
+    from src.config_loader import load_config
+    cfg = {"project": {"name": "test"}, "agents": [
+        {"role": "R1", "name": "Test", "role_goal": "Test agent"}
+    ]}
+    path = _write_temp_config(cfg)
+    result = load_config(path)
+    assert result["agents"][0]["role"] == "R1"
+    os.remove(path)
+
+def test_load_config_missing_agents():
+    """Config without agents should raise ValueError."""
+    from src.config_loader import load_config
+    cfg = {"project": {"name": "test"}}
+    path = _write_temp_config(cfg)
+    try:
+        load_config(path)
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "agents" in str(e)
+    finally:
+        os.remove(path)
+
+def test_load_config_empty_agents():
+    """Config with empty agents list should raise."""
+    from src.config_loader import load_config
+    cfg = {"agents": []}
+    path = _write_temp_config(cfg)
+    try:
+        load_config(path)
+        assert False, "Should have raised"
+    except ValueError as e:
+        assert "empty" in str(e)
+    finally:
+        os.remove(path)
+
+def test_load_q2_full_config():
+    """Full Q2 config with topology, design_notes, context, tools should load."""
+    from src.config_loader import load_config
+    cfg = {
+        "meta": {"project": "test", "version": "1.0"},
+        "models": {"default": "qwen2.5:7b", "registry": {
+            "qwen2.5:7b": {"provider": "ollama", "model": "qwen2.5:7b"}
+        }},
+        "agents": [
+            {"role": "R1", "name": "A1", "role_goal": "test",
+             "declared_tools": ["@web_search"]}
+        ],
+        "topology": {"stages": [
+            {"stage": 1, "agents": ["R1"], "mode": "serial", "max_retries": 3}
+        ]},
+        "design_notes": {
+            "why_these_agents": "Minimal test",
+            "gaps_found": [],
+            "risks": ["test risk"]
+        },
+        "context": {"routes": [
+            {"from": "R1", "to": "R2", "files": ["output.md"]}
+        ]},
+        "tools": {"global_whitelist": [
+            {"name": "read_file", "risk": "low"}
+        ]}
+    }
+    path = _write_temp_config(cfg)
+    result = load_config(path)
+    # Defaults should be filled
+    stage = result["topology"]["stages"][0]
+    assert stage["max_retries"] == 3
+    assert stage["on_fail"] is None
+    assert result["agents"][0]["declared_tools"] == ["@web_search"]
+    os.remove(path)
+
+def test_load_q2_missing_model_provider():
+    """Q2 models.registry entry without provider should fail."""
+    from src.config_loader import load_config
+    cfg = {
+        "models": {"default": "x", "registry": {"x": {"model": "y"}}},
+        "agents": [{"role": "R1", "name": "A", "role_goal": "test"}]
+    }
+    path = _write_temp_config(cfg)
+    try:
+        load_config(path)
+        assert False, "Should have raised"
+    except ValueError as e:
+        assert "provider" in str(e)
+    finally:
+        os.remove(path)
+
+def test_load_q2_bad_mode():
+    """Invalid stage mode should fail."""
+    from src.config_loader import load_config
+    cfg = {
+        "agents": [{"role": "R1", "name": "A", "role_goal": "test"}],
+        "topology": {"stages": [{"stage": 1, "agents": ["R1"], "mode": "concurrent"}]}
+    }
+    path = _write_temp_config(cfg)
+    try:
+        load_config(path)
+        assert False, "Should have raised"
+    except ValueError as e:
+        assert "mode" in str(e)
+    finally:
+        os.remove(path)
+
+def test_load_reference_config():
+    """q2_reference.json should load without errors."""
+    from src.config_loader import load_config
+    ref_path = os.path.join(
+        os.path.dirname(__file__), "..", "configs", "q2_reference.json")
+    result = load_config(ref_path)
+    assert len(result["agents"]) == 3
+    assert len(result["topology"]["stages"]) == 3
+    assert result["design_notes"]["why_these_agents"]
+
+
+if __name__ == "__main__":
+    import traceback
+    tests = [
+        test_exit_fingerprint_valid,
+        test_exit_fingerprint_missing,
+        test_exit_fingerprint_multiple,
+        test_run_bash_success,
+        test_run_bash_failure,
+        test_quality_gate_pass,
+        test_quality_gate_missing_file,
+        test_quality_gate_no_fingerprint,
+        test_context_budget,
+        test_oriented_loopback,
+        test_unclassified_loopback,
+        test_load_legacy_config,
+        test_load_config_missing_agents,
+        test_load_config_empty_agents,
+        test_load_q2_full_config,
+        test_load_q2_missing_model_provider,
+        test_load_q2_bad_mode,
+        test_load_reference_config,
+    ]
+    passed = 0
+    failed = 0
+    for test in tests:
+        try:
+            test()
+            print("  PASS: {}".format(test.__name__))
+            passed += 1
+        except Exception as e:
+            print("  FAIL: {} — {}".format(test.__name__, e))
+            failed += 1
+    
+    print("\n{} passed, {} failed".format(passed, failed))
+    if failed > 0:
+        sys.exit(1)

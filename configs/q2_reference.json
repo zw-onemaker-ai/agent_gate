@@ -1,0 +1,81 @@
+{
+  "meta": {
+    "project": "Todo API Demo",
+    "version": "1.0",
+    "description": "Q2 Phase 0 reference config — demonstrates full schema"
+  },
+  "models": {
+    "default": "qwen2.5:7b",
+    "registry": {
+      "qwen2.5:7b": {"provider": "ollama", "model": "qwen2.5:7b"},
+      "gpt-4o-mini": {"provider": "openai", "model": "gpt-4o-mini"}
+    }
+  },
+  "agents": [
+    {
+      "role": "R1",
+      "name": "需求分析",
+      "role_goal": "分析用户需求，产出 requirements.md，含3+用户故事和验收标准",
+      "output_file": "requirements.md",
+      "acceptance_criteria": [
+        "产出文件为非空Markdown",
+        "含至少3个用户故事",
+        "每个故事含验收标准"
+      ],
+      "declared_tools": ["@web_search", "@read_file"],
+      "scenario_type": "code_gen"
+    },
+    {
+      "role": "R2",
+      "name": "产品设计",
+      "role_goal": "基于需求产出产品规格说明书，定义MVP功能和优先级",
+      "output_file": "product_spec.md",
+      "acceptance_criteria": [
+        "含功能清单与优先级标注",
+        "MVP范围明确定义",
+        "技术约束已标注"
+      ],
+      "declared_tools": ["@read_file"],
+      "scenario_type": "code_gen"
+    },
+    {
+      "role": "R4",
+      "name": "后端开发",
+      "role_goal": "开发FastAPI Todo后端，含CRUD端点和健康检查",
+      "output_file": "backend/main.py",
+      "acceptance_criteria": [
+        "GET /todos 返回200",
+        "POST /todos 创建并返回201",
+        "GET /health 返回{\"status\":\"ok\"}"
+      ],
+      "verify_cmd": "python3 -c 'import sys; sys.path.insert(0,\"output/Todo_API_Demo\"); from backend.main import app; print(\"Import OK\"); print(\"EXIT:0\")'",
+      "declared_tools": ["@write_file", "@run_bash"],
+      "scenario_type": "code_gen"
+    }
+  ],
+  "topology": {
+    "stages": [
+      {"stage": 1, "agents": ["R1"], "mode": "serial", "max_retries": 3},
+      {"stage": 2, "agents": ["R2"], "mode": "serial", "max_retries": 3},
+      {"stage": 3, "agents": ["R4"], "mode": "serial", "max_retries": 3, "on_fail": "R1"}
+    ]
+  },
+  "context": {
+    "routes": [
+      {"from": "R1", "to": "R2", "files": ["requirements.md"]},
+      {"from": "R2", "to": "R4", "files": ["product_spec.md", "requirements.md"]}
+    ]
+  },
+  "tools": {
+    "global_whitelist": [
+      {"name": "read_file", "risk": "low"},
+      {"name": "write_file", "risk": "low"},
+      {"name": "web_search", "risk": "medium"}
+    ]
+  },
+  "design_notes": {
+    "why_these_agents": "3-agent sequential pipeline: 需求→设计→开发，覆盖MVP最小闭环",
+    "gaps_found": ["缺少R5前端Agent（MVP暂不包含UI）"],
+    "risks": ["R4后端可能因为缺少数据库配置而构建失败"]
+  }
+}

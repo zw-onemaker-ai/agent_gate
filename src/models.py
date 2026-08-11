@@ -21,6 +21,13 @@ class LoopbackTarget(Enum):
     NONE = "NONE"
 
 
+class CTXBudget(Enum):
+    """Context budget levels for assembled prompts."""
+    NORMAL = "CTX_NORMAL"       # ≤8KB — full context
+    WARNING = "CTX_WARNING"     # ≤16KB — contract + fail context
+    CRITICAL = "CTX_CRITICAL"   # >16KB — summary only
+
+
 @dataclass
 class ExitCodeFingerprint:
     raw_output: str
@@ -72,9 +79,28 @@ class ContextPackage:
 
 
 @dataclass
+class StageConfig:
+    """Pipeline stage configuration (Q2 Phase 0)."""
+    stage: int
+    agents: List[str]
+    mode: str = "serial"            # "serial" | "parallel"
+    max_retries: int = 3            # 🆕 Q2: retry limit per stage
+    on_fail: Optional[str] = None   # 🆕 Q2: loopback target on exhaustion
+
+
+@dataclass
+class DesignNotes:
+    """Design brain metadata (Q2 Phase 0)."""
+    why_these_agents: str = ""
+    gaps_found: List[str] = field(default_factory=list)
+    risks: List[str] = field(default_factory=list)
+
+
+@dataclass
 class PipelineState:
     project_name: str
     steps: List[ContextPackage] = field(default_factory=list)
     loopback_count: int = 0
     current_role: str = "R1"
     max_iterations: int = 5
+    design_notes: Optional[DesignNotes] = None  # 🆕 Q2
