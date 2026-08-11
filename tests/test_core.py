@@ -593,6 +593,121 @@ def test_engine_contract_verify_integration():
     os.rmdir(tmpdir)
 
 
+# ── Phase 3: Design Brain — orchestrator_agent ──
+
+def test_template_match_web_api():
+    """API keywords → web_api template."""
+    from src.orchestrator_agent import _match_template
+    assert _match_template("Build a REST API with FastAPI and CRUD endpoints") == "web_api"
+
+def test_template_match_cli():
+    """CLI keywords → cli_tool template."""
+    from src.orchestrator_agent import _match_template
+    assert _match_template("Create a command line tool with argparse") == "cli_tool"
+
+def test_template_match_data():
+    """Data keywords → data_pipeline template."""
+    from src.orchestrator_agent import _match_template
+    assert _match_template("Build an ETL data pipeline for CSV files") == "data_pipeline"
+
+def test_template_match_default():
+    """No keywords → default web_api."""
+    from src.orchestrator_agent import _match_template
+    result = _match_template("some random project without recognizable keywords")
+    assert result in ("web_api", "cli_tool", "data_pipeline")
+
+def test_generate_config_template():
+    """generate_pipeline_config without LLM → valid config from template."""
+    from src.orchestrator_agent import generate_pipeline_config
+    config = generate_pipeline_config(
+        "Build a REST API for a todo app", use_llm=False)
+    assert "meta" in config
+    assert "agents" in config
+    assert len(config["agents"]) >= 2
+    assert "topology" in config
+    assert "design_notes" in config
+    assert config["design_notes"]["why_these_agents"]
+
+def test_generate_config_contains_r1():
+    """Every generated config should start with R1."""
+    from src.orchestrator_agent import generate_pipeline_config
+    config = generate_pipeline_config(
+        "Build a CLI tool", use_llm=False)
+    assert config["agents"][0]["role"] == "R1"
+
+def test_parse_llm_output_json():
+    """_parse_llm_output should extract JSON from raw LLM output."""
+    from src.orchestrator_agent import _parse_llm_output
+    raw = 'Some text...\n{"agents": [{"role": "R1", "role_goal": "test"}]}\nMore text...'
+    result = _parse_llm_output(raw)
+    assert result is not None
+    assert result["agents"][0]["role"] == "R1"
+
+def test_parse_llm_output_fenced():
+    """_parse_llm_output should strip markdown fences."""
+    from src.orchestrator_agent import _parse_llm_output
+    raw = '```json\n{"agents": [{"role": "R1", "role_goal": "test"}]}\n```'
+    result = _parse_llm_output(raw)
+    assert result is not None
+    assert result["agents"][0]["role"] == "R1"
+
+def test_parse_llm_output_invalid():
+    """_parse_llm_output should return None for garbage."""
+    from src.orchestrator_agent import _parse_llm_output
+    assert _parse_llm_output("not json at all") is None
+
+def test_validate_orchestrator_output():
+    """_validate_orchestrator_output should reject bad configs."""
+    from src.orchestrator_agent import _validate_orchestrator_output
+    assert _validate_orchestrator_output({"agents": [{"role": "R1", "role_goal": "x"}]}) is True
+    assert _validate_orchestrator_output({"agents": []}) is False
+    assert _validate_orchestrator_output({"agents": [{"role": "R1"}]}) is False  # no role_goal
+    assert _validate_orchestrator_output("not dict") is False
+
+def test_expand_prompts_no_llm():
+    """expand_prompts without LLM should add template-based prompts."""
+    from src.orchestrator_agent import expand_prompts
+    config = {
+        "agents": [
+            {"role": "R1", "name": "Test", "role_goal": "test agent",
+             "output_file": "out.md", "scenario_type": "code_gen",
+             "acceptance_criteria": ["test"]},
+        ]
+    }
+    result = expand_prompts(config, call_llm_fn=None)
+    assert "prompt_template" in result["agents"][0]
+    assert "Role" in result["agents"][0]["prompt_template"]
+    assert "Test" in result["agents"][0]["prompt_template"]
+
+def test_expand_prompts_skips_existing():
+    """expand_prompts should not overwrite existing prompt_template."""
+    from src.orchestrator_agent import expand_prompts
+    config = {
+        "agents": [
+            {"role": "R1", "name": "Test", "role_goal": "test",
+             "prompt_template": "PRESERVE_ME", "output_file": "out.md"},
+        ]
+    }
+    result = expand_prompts(config, call_llm_fn=None)
+    assert result["agents"][0]["prompt_template"] == "PRESERVE_ME"
+
+def test_expand_prompts_all_templates():
+    """All 3 templates should produce valid expandable configs."""
+    from src.orchestrator_agent import generate_pipeline_config, expand_prompts
+    for desc in [
+        "Build a REST API",
+        "Create a CLI tool with click",
+        "Build an ETL data pipeline",
+    ]:
+        config = generate_pipeline_config(desc, use_llm=False)
+        result = expand_prompts(config, call_llm_fn=None)
+        for agent in result["agents"]:
+            assert "prompt_template" in agent
+            assert len(agent["prompt_template"]) > 50
+
+
+# ── Test runner ──
+
 if __name__ == "__main__":
     import traceback
     tests = [
@@ -635,6 +750,19 @@ if __name__ == "__main__":
         test_human_gate_categories,
         test_human_gate_prompt,
         test_engine_contract_verify_integration,
+        test_template_match_web_api,
+        test_template_match_cli,
+        test_template_match_data,
+        test_template_match_default,
+        test_generate_config_template,
+        test_generate_config_contains_r1,
+        test_parse_llm_output_json,
+        test_parse_llm_output_fenced,
+        test_parse_llm_output_invalid,
+        test_validate_orchestrator_output,
+        test_expand_prompts_no_llm,
+        test_expand_prompts_skips_existing,
+        test_expand_prompts_all_templates,
     ]
     passed = 0
     failed = 0
