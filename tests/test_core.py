@@ -323,3 +323,151 @@ if __name__ == "__main__":
     print("\n{} passed, {} failed".format(passed, failed))
     if failed > 0:
         sys.exit(1)
+
+
+# ── Phase 1: llm_client + context_assembler + contract ──
+
+def test_llm_client_creation():
+    """LLMClient should be creatable without errors."""
+    from src.llm_client import LLMClient
+    c = LLMClient(provider="ollama", model="test")
+    assert c.provider == "ollama"
+    assert c.model == "test"
+
+def test_llm_response_ok():
+    """LLMResponse.ok should work."""
+    from src.llm_client import LLMResponse
+    r1 = LLMResponse(content="hi", provider="test", model="x")
+    assert r1.ok is True
+    r2 = LLMResponse(content="", provider="test", model="x", error="fail")
+    assert r2.ok is False
+
+def test_contract_creation():
+    """Contract should be creatable with all fields."""
+    from src.models import Contract
+    c = Contract(
+        agent_id="R1",
+        summary="Built a Todo API",
+        output_files=["backend/main.py"],
+        endpoints=[{"method": "GET", "path": "/todos"}],
+        start_command="uvicorn main:app",
+        test_hints=["Test GET /todos returns 200"],
+    )
+    assert c.agent_id == "R1"
+    assert len(c.output_files) == 1
+    assert c.start_command == "uvicorn main:app"
+
+def test_contract_parse():
+    """parse_contract_from_output should extract CONTRACT_START/END block."""
+    from src.context_assembler import parse_contract_from_output
+    from src.models import Contract
+    output = """Some output text...
+CONTRACT_START
+summary: Built a Todo API with 4 CRUD endpoints
+output_files: backend/main.py, backend/models.py
+start_command: uvicorn main:app --port 8000
+test_hints: Test GET /todos; Test POST /todos
+CONTRACT_END
+More text..."""
+    c = parse_contract_from_output(output, "R4")
+    assert c is not None
+    assert c.agent_id == "R4"
+    assert "Todo API" in c.summary
+    assert "backend/main.py" in c.output_files
+    assert "backend/models.py" in c.output_files
+    assert "uvicorn" in c.start_command
+    assert len(c.test_hints) == 2
+
+def test_contract_parse_missing():
+    """Missing CONTRACT block should return None."""
+    from src.context_assembler import parse_contract_from_output
+    assert parse_contract_from_output("No contract here", "R1") is None
+
+def test_assembler_normal_budget():
+    """ContextAssembler with small input should use NORMAL budget."""
+    from src.context_assembler import ContextAssembler
+    from src.models import Contract
+    a = ContextAssembler()
+    contract = Contract(
+        agent_id="R1",
+        summary="Requirements doc",
+        output_files=["requirements.md"],
+    )
+    ctx = a.build(
+        agent_id="R2",
+        role_goal="Design product spec",
+        upstream_contracts=[contract],
+        project_background="Test project",
+    )
+    assert ctx.budget_mode == "CTX_NORMAL"
+    assert "R1" in ctx.prompt
+    assert "requirements.md" in ctx.prompt
+    assert len(ctx.files_available) > 0
+
+def test_assembler_retry_context():
+    """build_for_retry should inject failure context."""
+    from src.context_assembler import ContextAssembler
+    a = ContextAssembler()
+    ctx = a.build_for_retry(
+        agent_id="R2",
+        role_goal="Fix the issue",
+        fail_reason="EXIT:1 — test failed",
+    )
+    assert "RETRY" in ctx.prompt
+    assert "EXIT:1" in ctx.prompt
+
+def test_llm_validate_env():
+    """validate_env should report missing API keys."""
+    from src.llm_client import LLMClient
+    registry = {
+        "gpt": {"provider": "openai", "model": "gpt-4o-mini"}
+    }
+    warnings = LLMClient.validate_env(registry)
+    # May or may not warn depending on env, but shouldn't crash
+    assert isinstance(warnings, list)
+
+
+if __name__ == "__main__":
+    import traceback
+    tests = [
+        test_exit_fingerprint_valid,
+        test_exit_fingerprint_missing,
+        test_exit_fingerprint_multiple,
+        test_run_bash_success,
+        test_run_bash_failure,
+        test_quality_gate_pass,
+        test_quality_gate_missing_file,
+        test_quality_gate_no_fingerprint,
+        test_context_budget,
+        test_oriented_loopback,
+        test_unclassified_loopback,
+        test_load_legacy_config,
+        test_load_config_missing_agents,
+        test_load_config_empty_agents,
+        test_load_q2_full_config,
+        test_load_q2_missing_model_provider,
+        test_load_q2_bad_mode,
+        test_load_reference_config,
+        test_llm_client_creation,
+        test_llm_response_ok,
+        test_contract_creation,
+        test_contract_parse,
+        test_contract_parse_missing,
+        test_assembler_normal_budget,
+        test_assembler_retry_context,
+        test_llm_validate_env,
+    ]
+    passed = 0
+    failed = 0
+    for test in tests:
+        try:
+            test()
+            print("  PASS: {}".format(test.__name__))
+            passed += 1
+        except Exception as e:
+            print("  FAIL: {} — {}".format(test.__name__, e))
+            failed += 1
+
+    print("\n{} passed, {} failed".format(passed, failed))
+    if failed > 0:
+        sys.exit(1)

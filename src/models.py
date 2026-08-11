@@ -48,6 +48,20 @@ class ExitCodeFingerprint:
 
 
 @dataclass
+class Contract:
+    """Agent产出契约——结构化Handoff（Phase 1）。
+    由Agent自述产出内容，下游Agent消费此契约获取上游信息。
+    """
+    agent_id: str
+    summary: str = ""                      # 一句话描述产出
+    output_files: List[str] = field(default_factory=list)
+    endpoints: List[dict] = field(default_factory=list)   # API端点
+    start_command: str = ""                # 启动命令
+    test_hints: List[str] = field(default_factory=list)   # 测试提示
+    schema_info: dict = field(default_factory=dict)       # 数据格式/表结构
+
+
+@dataclass
 class AgentOutput:
     role: str
     role_name: str
@@ -56,6 +70,7 @@ class AgentOutput:
     exit_fingerprint: Optional[ExitCodeFingerprint] = None
     quality_gate: GateStatus = GateStatus.FAIL
     context_card: str = ""
+    contract: Optional[Contract] = None   # 🆕 Phase 1: structured handoff
 
 
 @dataclass

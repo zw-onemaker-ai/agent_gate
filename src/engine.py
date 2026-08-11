@@ -5,6 +5,7 @@ Core design (extracted from 一人公司 v4.4.0):
   - All Bash verification must carry EXIT_CODE fingerprint
   - Failed gate → oriented loopback (not always back to start)
   - Context packages are immutable snapshots for audit trail
+  - Phase 1: llm_client for unified LLM calls + context_assembler for prompt building
 """
 
 import json
@@ -14,10 +15,12 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from .models import (
-    AgentOutput, ContextPackage, GateStatus, LoopbackTarget,
+    AgentOutput, ContextPackage, Contract, GateStatus, LoopbackTarget,
     PipelineState, QualityGateResult,
 )
 from .validators import quality_gate_check, run_bash
+from .llm_client import LLMClient, LLMResponse
+from .context_assembler import ContextAssembler, parse_contract_from_output
 
 
 class AgentGate:
@@ -36,7 +39,11 @@ class AgentGate:
         self.model_name = model_name
         self._agents = {}  # type: Dict[str, dict]
         self._gate_history = []  # type: List[QualityGateResult]
-        self._lock = threading.Lock()  # guards _gate_history and loopback_count in parallel mode
+        self._lock = threading.Lock()
+        # Phase 1: unified LLM client + context assembler
+        self.llm = LLMClient(provider=model_provider, model=model_name)
+        self.assembler = ContextAssembler()
+        self._upstream_contracts = []  # type: List[Contract] — accumulate across stages
 
     def register_agent(self, role, name, prompt_template="",
                        verify_cmd="", output_file="",
@@ -64,15 +71,16 @@ class AgentGate:
             "scenario_type": scenario_type,
         }
 
+    def _make_llm_call(self, system_prompt, user_prompt):
+        # type: (str, str) -> str
+        """Bridge for prompt_gen — uses llm_client, returns raw string."""
+        resp = self.llm.call(system_prompt=system_prompt, user_prompt=user_prompt)
+        return resp.content if resp.ok else "[LLM_ERROR: {}]".format(resp.error)
+
     def _call_llm(self, system_prompt, user_prompt):
         # type: (str, str) -> str
-        """Call LLM. Supports Ollama and LiteLLM providers."""
-        if self.model_provider == "ollama":
-            return self._call_ollama(system_prompt, user_prompt)
-        elif self.model_provider in ("openai", "litellm"):
-            return self._call_litellm(system_prompt, user_prompt)
-        else:
-            raise ValueError("Unknown provider: {}".format(self.model_provider))
+        """Legacy LLM call — delegates to _make_llm_call."""
+        return self._make_llm_call(system_prompt, user_prompt)
 
     def _call_ollama(self, system, user):
         # type: (str, str) -> str
@@ -140,15 +148,29 @@ class AgentGate:
                 scenario_type=agent.get("scenario_type", "general"),
                 output_file=agent.get("output_file", "output.md"),
                 criteria=agent.get("acceptance_criteria", []),
-                call_llm_fn=self._call_llm,
+                call_llm_fn=self._make_llm_call,
             )
             agent["prompt_template"] = prompt_template
             print("  [AUTO] Prompt generated ({} chars)".format(len(prompt_template)))
 
-        raw_output = self._call_llm(
-            system_prompt=prompt_template,
-            user_prompt=context or "Proceed with your task.",
+        # Phase 1: assemble context with upstream contracts
+        assembled = self.assembler.build(
+            agent_id=role,
+            role_goal=agent.get("role_goal", ""),
+            prompt_template=prompt_template,
+            upstream_contracts=self._upstream_contracts if self._upstream_contracts else None,
+            project_background=self.state.project_name,
         )
+        if assembled.budget_mode != "CTX_NORMAL":
+            print("  [BUDGET] {} ({}B upstream)".format(
+                assembled.budget_mode, assembled.total_bytes))
+
+        # Phase 1: use llm_client
+        raw = self.llm.call(
+            system_prompt=assembled.prompt,
+            user_prompt=context or "",
+        )
+        raw_output = raw.content if raw.ok else "[LLM_ERROR: {}]".format(raw.error)
 
         output_file = agent.get("output_file", "")
         part_a_files = []
@@ -188,6 +210,17 @@ class AgentGate:
         with self._lock:
             self._gate_history.append(gate_result)
 
+        # Phase 1: parse contract from output
+        contract = parse_contract_from_output(raw_output, role)
+        if contract and contract.summary:
+            print("  [CONTRACT] {} → {}".format(role, contract.summary[:80]))
+        else:
+            contract = Contract(
+                agent_id=role,
+                summary="{} output".format(agent["name"]),
+                output_files=part_a_files,
+            )
+
         agent_output = AgentOutput(
             role=role,
             role_name=agent["name"],
@@ -196,7 +229,12 @@ class AgentGate:
             exit_fingerprint=gate_result.exit_fingerprint,
             quality_gate=gate_result.status,
             context_card=self._build_context_card(role, agent, gate_result),
+            contract=contract,
         )
+
+        # Accumulate for downstream
+        if gate_result.status in (GateStatus.PASS, GateStatus.CONDITIONAL):
+            self._upstream_contracts.append(contract)
 
         self._print_gate_report(gate_result)
         return agent_output
@@ -290,7 +328,8 @@ class AgentGate:
                 continue
 
             # All passed — advance to next stage
-            # Merge context from all agents in this stage
+            # Phase 1: contracts already accumulated in self._upstream_contracts
+            # Merge context cards for backward-compat text context
             context = self._merge_context_cards(outputs)
             stage_idx += 1
 
