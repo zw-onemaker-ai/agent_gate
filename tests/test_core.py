@@ -977,6 +977,64 @@ def test_orchestrator_multi_model_template():
         assert "role_goal" in agent
 
 
+# ── v1.2: Platform Advisor — API规划 + 自动分配 ──
+
+def test_platform_advisor_analyze():
+    """analyze_project should produce a valid DependencyPlan."""
+    from src.platform_advisor import analyze_project
+    plan = analyze_project(
+        "Build a FastAPI todo backend with user auth",
+        available_keys=["DASHSCOPE_API_KEY"],
+    )
+    assert plan.project_name
+    assert len(plan.recommendations) >= 2
+    assert plan.total_platforms >= 1
+    assert plan.estimated_monthly_cost
+    assert plan.summary
+
+def test_platform_advisor_no_keys():
+    """Without any API keys, should fall back to Ollama."""
+    from src.platform_advisor import analyze_project
+    plan = analyze_project("Build a simple CLI tool", available_keys=[])
+    for rec in plan.recommendations:
+        assert rec.platform_id == "ollama",             "Expected ollama, got {}: {}".format(rec.platform_id, rec.model)
+
+def test_platform_advisor_resolve_config():
+    """resolve_config should generate valid config from plan."""
+    from src.platform_advisor import analyze_project, resolve_config
+    plan = analyze_project("Build a REST API", available_keys=["DASHSCOPE_API_KEY"])
+    config = resolve_config(plan, {"DASHSCOPE_API_KEY": "sk-test"})
+    assert "meta" in config
+    assert len(config["agents"]) >= 2
+    for agent in config["agents"]:
+        assert "model" in agent
+
+def test_platform_advisor_config_loadable():
+    """Generated config should pass config_loader validation."""
+    import tempfile, json as jm, os
+    from src.platform_advisor import analyze_project, resolve_config
+    from src.config_loader import load_config
+    plan = analyze_project("Build a REST API", available_keys=["DASHSCOPE_API_KEY"])
+    config = resolve_config(plan, {"DASHSCOPE_API_KEY": "sk-test"})
+    tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    jm.dump(config, tf)
+    tf.close()
+    try:
+        validated = load_config(tf.name)
+        assert len(validated["agents"]) >= 2
+    finally:
+        os.remove(tf.name)
+
+def test_platform_advisor_all_platforms():
+    """All platform profiles should have required fields."""
+    from src.platform_advisor import PLATFORMS
+    for pid, p in PLATFORMS.items():
+        assert p.id and p.name and p.base_url and p.provider
+        assert len(p.models) >= 1
+        for m in p.models:
+            assert m.name and len(m.strengths) >= 1
+
+
 # ── Test runner ──
 
 if __name__ == "__main__":
@@ -1053,6 +1111,11 @@ if __name__ == "__main__":
         test_config_providers_section,
         test_bailian_config_loads,
         test_orchestrator_multi_model_template,
+        test_platform_advisor_analyze,
+        test_platform_advisor_no_keys,
+        test_platform_advisor_resolve_config,
+        test_platform_advisor_config_loadable,
+        test_platform_advisor_all_platforms,
     ]
     passed = 0
     failed = 0
