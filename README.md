@@ -1,6 +1,6 @@
 <div align="center">
-  <h1>AgentGate</h1>
-  <p><strong>AI 管线质量框架 — 让 Agent 不再胡说八道</strong></p>
+  <h1>🛡️ AgentGate</h1>
+  <p><strong>多 Agent 管线可靠性操作系统 — 「Agent 管编，闸门管信」</strong></p>
 </div>
 
 <div align="center">
@@ -14,20 +14,45 @@
 
 ## 这是什么
 
-AgentGate 解决一个具体问题：**当你让多个 AI Agent 协作完成一个项目时，怎么保证它们不互相传递垃圾？**
+**市面上所有多 Agent 框架默认「Agent 产出可信」。AgentGate 默认「不可信，验证过才算」。**
 
-市面上大多数 Agent 框架只关心"怎么串起来"。AgentGate 关心的是"串起来之后怎么保证质量"——每个 Agent 的输出必须通过质量门禁才能传给下一个，失败了定向回环修复，整个管线有医生诊断。它出身于[一人公司·产品工厂](https://github.com/zw-onemaker-ai)的实战场景：一个人管理多 AI Agent 协作，没有人工审核的奢侈，必须靠系统自身保证输出质量。
+当你让多个 AI Agent 协作完成一个项目时，怎么保证它们不互相传递垃圾？LangChain/CrewAI/AutoGen 关心的是「怎么串起来」，AgentGate 关心的是「串起来之后怎么保证端到端可靠」——每个 Agent 的输出必须通过闸门验证才能传给下一个，失败定向回环修复，管线卡死有医生自动诊断。
 
-### 跟其他框架的区别
+它出身于[一人公司·产品工厂](https://github.com/zw-onemaker-ai)的实战场景：一个人管理多 AI Agent 协作，没有人工审核的奢侈，必须靠系统自身保证输出质量。
 
-| | LangChain | CrewAI | AgentGate |
-|------|-----------|--------|-----------|
-| 定位 | LLM应用开发 | 多Agent协作 | **Agent管线质量保证** |
-| 反幻觉 | 无内置 | 无内置 | EXIT_CODE指纹 + 契约交叉验证 |
-| 质量门禁 | 无 | 无 | 每个Agent输出自动验证，失败定向回环 |
-| 管线诊断 | 无 | 无 | Pipeline Doctor 6项检查 |
-| 模型选择 | 手动 | 手动 | Platform Advisor 自动选最优平台+模型 |
-| 适用场景 | 通用LLM应用 | 多Agent任务 | **生产级Agent管线** |
+---
+
+## 五层可靠性 OS
+
+AgentGate 不是在 Agent 外面加一层薄薄的校验——它是一套完整的 **5 层可靠性操作系统**，每层解决一类重复出现的多 Agent 协作问题：
+
+```mermaid
+flowchart TB
+    subgraph 五层可靠性OS
+        direction TB
+        L1["① 记忆层<br/>项目记忆+会话日志+防膨胀裁剪<br/>Agent 调完不消失，断点可恢复"]
+        L2["② 上下文层<br/>ContextPackage 物化+ContextCard 摘要+三级预算<br/>Agent 间传递精确信息，不传垃圾"]
+        L3["③ 防幻觉层<br/>EXIT 指纹+三道闸门+交叉验证<br/>「你说的不算，我验证了才算」"]
+        L4["④ 提示词层<br/>CPOO 五模块生成+场景适配+自我迭代<br/>模型换了提示词自动适配"]
+        L5["⑤ 流程层<br/>定向回环+Pipeline Doctor+HumanGate<br/>管线自愈，卡住了不用人救"]
+        
+        L1 --> L2 --> L3 --> L4 --> L5
+    end
+    
+    Agent["🤖 Agent 产出"] --> L3
+    L3 -->|PASS| Next["→ 下游 Agent"]
+    L3 -->|FAIL| Loop["⟲ 定向回环"]
+```
+
+| 层级 | 解决的痛点 | 没有这层会怎样 |
+|------|-----------|--------------|
+| ① 记忆 | Agent 调完失忆，下次从零开始 | 每次对话重建上下文，12 步管线走到第 8 步崩了→从头来 |
+| ② 上下文 | Agent 间无共享大脑，传递失真 | 上游改了 API，下游不知道，调了三轮才发现接口对不上 |
+| ③ 防幻觉 | 产出未经验证流入下游 | Agent 说「我写好了 main.py」→文件根本不存在→下游基于空气继续开发 |
+| ④ 提示词 | 模型换了提示词不换 | 从 Claude 换到 Qwen，同一个提示词效果断崖下降 |
+| ⑤ 流程 | 一个 Agent 卡住全线停摆 | Agent A 挂了→管线静默卡死→3 小时后你发现了 |
+
+> **单层不够，5 层叠加才叫可靠性。** 就像刹车、安全带、气囊、ABS、碰撞预警——单用哪一个都不够，全配上才敢上路。
 
 ---
 
@@ -65,7 +90,35 @@ AgentGate 解决一个具体问题：**当你让多个 AI Agent 协作完成一�
   └──────────────────────────────────────────────┘
 ```
 
-设计脑用 LLM 做规划（需要创造力），执行脑用纯规则引擎做验证（需要可靠性）。这是刻意的不对称设计——规划可以模糊，执行必须精确。
+设计脑用 LLM 做规划（需要创造力），执行脑用纯规则引擎做验证（需要可靠性）。这是刻意的不对称设计——**规划可以模糊，执行必须精确。** LLM 可能会胡说，但 `subprocess.run()` 不会。
+
+---
+
+## 跟其他框架的区别
+
+AgentGate **不是又一个 Agent 框架**——它是坐在所有 Agent 框架下面的一层可靠性基础设施。跟 LangChain/CrewAI/AutoGen 不是竞品，是互补。
+
+| | LangChain | CrewAI | LangGraph | Dify | AutoGen | **AgentGate** |
+|------|-----------|--------|-----------|------|---------|-----------|
+| 定位 | LLM 应用开发 | 多 Agent 协作 | 状态机编排 | 可视化工作流 | 多 Agent 对话 | **Agent 管线可靠性** |
+| 反幻觉 | 无内置 | 无内置 | 无内置 | 无内置 | 无内置 | EXIT 指纹+交叉验证 |
+| 质量闸门 | 无 | 无 | 无 | 无 | 无 | 三道闸门，逐 Agent 验证 |
+| 上下文管理 | 手动 | 手动 | State 持久化 | 变量节点 | 消息传递 | ContextPackage 物化+三级预算 |
+| 管线诊断 | 无 | 无 | 无 | 无 | 无 | Pipeline Doctor 自动诊断 |
+| 提示词优化 | 无 | 无 | 无 | 无 | 无 | CPOO 五模块自动生成 |
+| 定向回环 | 无 | 无 | 条件分支 | 条件节点 | 无 | 按错误类型精确回环 |
+
+> **简单说**：LangChain/CrewAI 帮你「让 Agent 跑起来」。AgentGate 帮你「让 Agent 可靠地跑下去」。
+
+---
+
+## 谁该用 AgentGate
+
+| 场景 | 痛点 | AgentGate 怎么帮 |
+|------|------|-----------------|
+| 🏢 **多 Agent 管线团队**<br>3+ Agent 协作，产出质量不稳定 | Agent 多了出错概率指数增长，一个人审不过来 | 每个 Agent 产出自动闸门验证，不用人盯 |
+| 🏭 **内网/离线 AI 部署**<br>国企/安全单位，只能用本地模型 | Ollama+Qwen 等弱模型幻觉更严重，不敢上生产 | 5 层闸门兜底——弱模型也能达到生产级可靠性 |
+| 💼 **AI 交付 freelancer**<br>一个人接项目，用 AI 加速交付 | AI 生成代码不知道能不能跑，调试时间比手写还长 | EXIT 指纹+契约验证——代码不跑通不放行 |
 
 ---
 
@@ -108,9 +161,7 @@ print(plan.summary)
 ```bash
 export DASHSCOPE_API_KEY="sk-你的key"
 
-# 初始化设计脑
 python3 -c "from src.workspace import init_workspace; init_workspace()"
-
 # 设计脑会自动: R1→qwen-turbo(便宜) R4→qwen-coder-plus(代码强)
 ```
 
@@ -133,14 +184,11 @@ python3 -c "from src.workspace import init_workspace; init_workspace()"
 
 ```python
 from src.platform_advisor import analyze_project, resolve_config
-from src.config_loader import build_pipeline, load_config
 import json
 
-# 分析 → 规划 → 生成配置
 plan = analyze_project("做一个会议室预定系统，FastAPI后端+React前端，支持Google日历同步")
 config = resolve_config(plan)
 
-# 保存配置
 with open("meeting_room.json", "w") as f:
     json.dump(config, f, indent=2, ensure_ascii=False)
 ```
@@ -154,38 +202,46 @@ from src.config_loader import build_pipeline
 
 result = build_pipeline(config, provider="litellm", model="qwen-turbo")
 gate = result["gate"]
-
-# 执行管线
 gate.run_pipeline(initial_context="按照 meeting_room.json 中的规格开发")
 
 # 诊断（如果出错）
 diagnosis = gate.diagnose()
 print(diagnosis.summary)
 
-# 保存状态
-session_id = gate.save()
+session_id = gate.save()  # 保存状态，下次可恢复
 ```
 
 ### 3. 怎么保证质量
 
-AgentGate 做了五层验证，每一步都不能跳过：
-
 ```
 Agent 产出
   ↓
-① 文件存在性检查 (Part A 文件是否真实存在)
+① 文件存在性检查 (Part A 文件是否真实存在且非空)
   ↓
-② EXIT_CODE 指纹验证 (Bash 命令必须输出 EXIT:0, 防伪造)
+② EXIT_CODE 指纹验证 (Bash 命令必须输出 EXIT:0, Agent 不能伪造)
   ↓
-③ 契约交叉验证 (Agent 声称产出了 main.py → 检查文件确实存在且非空)
+③ 契约交叉验证 (Agent 声称产出了 main.py → 实际检查磁盘)
   ↓
-④ CPOO 提示词评分 (提示词质量≥80分, <60分自动重写)
+④ CPOO 提示词评分 (提示词质量≥80分, <60分自动优化)
   ↓
-⑤ 工具白名单风控 (Agent 只能用声明的工具, 高风险工具强制门禁)
+⑤ 工具白名单风控 (高风险工具强制门禁, 越权自动拦截)
   ↓
-通过 → 传给下一个Agent
-失败 → 定向回环 (不是盲目重启, 而是回退到出问题的那个Agent)
+通过 → 传给下一个 Agent
+失败 → 定向回环 (回退到出问题的那个 Agent, 不是盲目重启)
 ```
+
+---
+
+## 真实战痕：AI 管线踩过的坑
+
+这些不是理论推演，是跑了 100+ 次多 Agent 管线后发现的反模式：
+
+| 🩸 反模式 | 表现 | AgentGate 怎么防 |
+|-----------|------|-----------------|
+| **CSS 同名覆盖** | 两个 CSS 文件有同名选择器，后者静默覆盖前者。改了 3 轮才发现 | 契约验证检测到文件变更但效果不匹配时触发警告 |
+| **数据库幽灵库** | 相对路径 `./data/db.sqlite` → 工作目录变化 → 连到空库 → 表「丢了」 | EXIT 指纹验证启动时检查数据库连接 |
+| **Agent 说做了其实没做** | Agent 声称「已经写好了 main.py」→ 文件根本不存在 → 下游基于空气开发 | 文件存在性检查：每个产出文件必须真实存在且非空 |
+| **重启删库** | 启动脚本里有 `rm -f *.db` → 用户数据全丢 | 工具白名单拦截高风险文件操作 |
 
 ---
 
@@ -198,49 +254,76 @@ agent_gate/
 │   ├── orchestrator_agent.py  ← 设计脑 (需求→配置)
 │   ├── platform_advisor.py    ← 平台顾问 (自动选模型)
 │   ├── validators.py          ← 质量验证器 (EXIT指纹/契约验证)
-│   ├── human_gate.py          ← 人工干预 (6类失败场景)
+│   ├── human_gate.py          ← 人工干预 (不可分类错误升级)
 │   ├── cpoo_scorer.py         ← 提示词评分
-│   ├── tool_registry.py       ← 工具白名单
-│   ├── memory_manager.py      ← 状态持久化
-│   ├── pipeline_doctor.py     ← 管线诊断
-│   ├── context_assembler.py   ← 3级上下文预算
+│   ├── tool_registry.py       ← 工具白名单+风险分级
+│   ├── memory_manager.py      ← 状态持久化+防膨胀裁剪
+│   ├── pipeline_doctor.py     ← 管线自动诊断
+│   ├── context_assembler.py   ← 上下文预算+ContextPackage组装
 │   ├── llm_client.py          ← 多模型统一调用
-│   ├── config_loader.py       ← 配置验证 (向后兼容)
+│   ├── config_loader.py       ← 配置验证
 │   └── workspace.py           ← 工作区配置
+├── docs/
+│   ├── TECHNICAL_ARCHITECTURE.md  ← 完整技术架构
+│   └── protocols/
+│       ├── 01_exit_fingerprint.md    ← EXIT 指纹协议
+│       ├── 02_quality_gate.md        ← 质量闸门判定逻辑
+│       └── 03_oriented_loopback.md   ← 定向回环机制
 ├── configs/                   ← 配置模板
-├── tests/test_core.py         ← 76个测试
+├── tests/test_core.py         ← 76 个测试
 └── memory/                    ← 项目记忆
 ```
 
 ---
 
+## 深入阅读
+
+README 是店招，技术细节在文档里：
+
+| 想了解 | 去看 |
+|--------|------|
+| 完整架构设计、双脑分离原理、5 层详细拆解 | [`docs/TECHNICAL_ARCHITECTURE.md`](docs/TECHNICAL_ARCHITECTURE.md) |
+| EXIT_CODE 指纹为什么 Agent 伪造不了 | [`docs/protocols/01_exit_fingerprint.md`](docs/protocols/01_exit_fingerprint.md) |
+| 质量闸门三道检查的完整判定逻辑 | [`docs/protocols/02_quality_gate.md`](docs/protocols/02_quality_gate.md) |
+| 定向回环的 4 种路由路径和 HumanGate 触发条件 | [`docs/protocols/03_oriented_loopback.md`](docs/protocols/03_oriented_loopback.md) |
+
+---
+
 ## 设计哲学
 
-### 一人公司驱动
+### 从一人公司长出来的
 
-这个项目来自真实需求：一个人管多个 AI Agent，没有团队帮你审核输出。所以 AgentGate 把"不信任任何 Agent 的输出"作为默认姿态——每个 Agent 的输出都必须通过 Bash 验证，每次 Bash 验证都必须带 EXIT_CODE 指纹。
+这个项目来自真实需求：一个人管多个 AI Agent，没有团队帮你审核输出。所以 AgentGate 把「不信任任何 Agent 的输出」作为默认姿态——每个 Agent 的输出都必须通过 Bash 验证，每次 Bash 验证都必须带 EXIT_CODE 指纹。**信任是假的，验证才是真的。**
 
-### 反幻觉不是口号
+### 约束手，不约束脑
 
-很多框架说"我们解决幻觉"，但只是让 LLM 自己检查自己——这跟让学生自己批改自己的考卷有什么区别？AgentGate 的做法是：
-
-- **EXIT_CODE 指纹**: Agent 说的"我验证过了"不算数，Bash 命令的退出码才算
-- **契约交叉验证**: Agent 声称产出了 `main.py` → 系统实际去磁盘上检查文件存不存在、是不是空的
-- **CPOO 评分**: 提示词本身经过 5 模块评分，低于 80 分自动优化
+限制 Agent 能做什么操作（工具白名单、风险分级），但不限制 Agent 怎么思考。Agent 有判断权（需要什么工具），框架有执行权（真正调用+验证）。闸门不是天花板，是地板——只管「不低于」，不管「有多高」。
 
 ### 设计脑 vs 执行脑
 
-这是从编译器设计借鉴的思路——前端负责理解和规划（可以模糊），后端负责生成和验证（必须精确）。设计脑用 LLM 做需求拆解，执行脑用纯 Python 做规则执行。LLM 可能会胡说，但 `subprocess.run()` 不会。
+从编译器设计借鉴——前端负责理解和规划（可以模糊），后端负责生成和验证（必须精确）。设计脑用 LLM 做需求拆解，执行脑用纯 Python 做规则执行。LLM 可能会胡说，但 `subprocess.run()` 不会。
+
+---
+
+## 合作咨询
+
+AgentGate 是开源项目（MIT），可自由使用。如果你需要：
+
+- **企业多 Agent 管线架构咨询** — 帮你的团队设计可靠的 Agent 协作拓扑
+- **内网/离线 AI 部署方案** — Ollama + Qwen + AgentGate，不依赖外网的生产级可靠性
+- **定制化闸门规则** — 针对你的业务场景定制验证逻辑
+
+📧 欢迎通过 [GitHub Issues](https://github.com/zw-onemaker-ai/agent_gate/issues) 或 [Discussions](https://github.com/zw-onemaker-ai/agent_gate/discussions) 联系。
 
 ---
 
 ## 贡献
 
-这是一个一人公司项目，但欢迎任何形式的贡献：
+欢迎任何形式的贡献：
 
 - **Bug 报告**: [Issues](https://github.com/zw-onemaker-ai/agent_gate/issues)
 - **功能建议**: [Discussions](https://github.com/zw-onemaker-ai/agent_gate/discussions)
-- **PR**: 确保 `python3 tests/test_core.py` 全部通过
+- **PR**: 确保 `python3 -m pytest tests/test_core.py` 全部通过
 
 ## 许可
 
