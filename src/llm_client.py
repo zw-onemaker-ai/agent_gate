@@ -32,11 +32,13 @@ class LLMClient:
     Provider + model resolved from config.models.registry.
     """
 
-    def __init__(self, provider="ollama", model="qwen2.5:7b", base_url=None, api_key=None):
+    def __init__(self, provider="ollama", model="qwen2.5:7b", base_url=None, api_key=None,
+                 timeout=300):
         self.provider = provider
         self.model = model
         self.base_url = base_url
         self.api_key = api_key
+        self.timeout = timeout  # seconds; CPU-only local inference can be slow
 
     def call(self, system_prompt, user_prompt="", provider=None, model=None,
              base_url=None, api_key=None):
@@ -83,7 +85,7 @@ class LLMClient:
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read())
                 return LLMResponse(
                     content=data.get("message", {}).get("content", ""),

@@ -18,6 +18,7 @@ class LoopbackTarget(Enum):
     BACKEND = "R4"
     FRONTEND = "R5"
     SECURITY = "R6"
+    SELF = "SELF"  # Retry the same agent — transient infra failures (e.g. LLM call errors)
     NONE = "NONE"
 
 

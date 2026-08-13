@@ -217,11 +217,20 @@ class AgentGate:
             system_prompt=assembled.prompt,
             user_prompt=context or "",
         )
-        raw_output = raw.content if raw.ok else "[LLM_ERROR: {}]".format(raw.error)
+        llm_error = None
+        if not raw.ok:
+            # LLM call failure is an infrastructure error, not an artifact.
+            # Never write the error text as the agent's output — otherwise a
+            # failed call could pass the gate as a "valid" file (silent failure).
+            print("  [LLM_FAIL] {}".format(raw.error))
+            llm_error = raw.error
+            raw_output = ""
+        else:
+            raw_output = raw.content
 
         output_file = agent.get("output_file", "")
         part_a_files = []
-        if output_file:
+        if output_file and not llm_error:
             full_path = self.output_dir / output_file
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(raw_output, encoding="utf-8")
@@ -254,6 +263,16 @@ class AgentGate:
             part_a_files=part_a_files,
             verification_output=verify_output,
         )
+        if llm_error:
+            # LLM call failures are loud: FAIL the gate explicitly and retry
+            # the same agent (transient infra errors usually recover).
+            gate_result.status = GateStatus.FAIL
+            gate_result.fail_reasons = [
+                r for r in gate_result.fail_reasons
+                if not r.startswith("[HUMAN_GATE]")
+            ]
+            gate_result.fail_reasons.append("LLM call failed: {}".format(llm_error))
+            gate_result.loopback_target = LoopbackTarget.SELF
         with self._lock:
             self._gate_history.append(gate_result)
 
@@ -379,6 +398,16 @@ class AgentGate:
                         self._gate_history[-1].exit_fingerprint.raw_output if self._gate_history[-1].exit_fingerprint else "",
                     )
 
+                if target == LoopbackTarget.SELF:
+                    # Retry the same stage — transient infra failures (LLM call errors)
+                    print("\n[LOOPBACK] {} → retry same stage (transient failure)".format(
+                        "+".join(stage_roles)))
+                    context = "[LOOPBACK] RETRY: {}\n[CONTEXT] Upstream: {}".format(
+                        ", ".join(self._gate_history[-1].fail_reasons),
+                        " | ".join(c.summary for c in self._upstream_contracts if c.summary) or "(none)",
+                    )
+                    continue
+
                 print("\n[LOOPBACK] {} → {} (reason: {})".format(
                     "+".join(stage_roles), target.value,
                     ", ".join(self._gate_history[-1].fail_reasons)))
@@ -397,8 +426,17 @@ class AgentGate:
                         if c.agent_id in target_roles_before
                     ]
                 else:
-                    stage_idx = 0  # Fallback: restart from beginning
-                    self._upstream_contracts = []
+                    # Classifier routed to a role that doesn't exist in this
+                    # pipeline (e.g. R4 but the project has no backend agent).
+                    # Don't silently restart the whole pipeline — retry the
+                    # current stage with failure context instead.
+                    print("[LOOPBACK] target {} not in plan — retrying current stage".format(
+                        target.value))
+                    context = "[LOOPBACK] RETRY: {}\n[CONTEXT] Upstream: {}".format(
+                        ", ".join(self._gate_history[-1].fail_reasons),
+                        " | ".join(c.summary for c in self._upstream_contracts if c.summary) or "(none)",
+                    )
+                    continue
 
                 # Phase 2: pass both failure context AND surviving upstream context
                 upstream_summary = " | ".join(
