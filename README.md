@@ -327,4 +327,4 @@ AgentGate 是开源项目（MIT），可自由使用。如果你需要：
 
 ## 许可
 
-MIT License © 2026 一人公司 · 产品工厂
+MIT License © 2026 zw-onemaker-ai
