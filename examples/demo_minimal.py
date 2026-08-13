@@ -132,6 +132,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--provider", default="ollama")
     p.add_argument("--model", default="qwen2.5:7b")
-    p.add_argument("--mock", action="store_true", default=True)
+    p.add_argument("--mock", action="store_true", default=False, help="Dry-run without LLM calls")
     args = p.parse_args()
     run_demo(provider=args.provider, model=args.model, mock=args.mock)
