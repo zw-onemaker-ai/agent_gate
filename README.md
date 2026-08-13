@@ -28,20 +28,19 @@ AgentGate 不是在 Agent 外面加一层薄薄的校验——它是一套完整
 
 ```mermaid
 flowchart TB
-    subgraph 五层可靠性OS
+    subgraph OS["AgentGate · 5 层可靠性 OS"]
         direction TB
-        L1["① 记忆层<br/>项目记忆+会话日志+防膨胀裁剪<br/>Agent 调完不消失，断点可恢复"]
-        L2["② 上下文层<br/>ContextPackage 物化+ContextCard 摘要+三级预算<br/>Agent 间传递精确信息，不传垃圾"]
-        L3["③ 防幻觉层<br/>EXIT 指纹+三道闸门+交叉验证<br/>「你说的不算，我验证了才算」"]
-        L4["④ 提示词层<br/>CPOO 五模块生成+场景适配+自我迭代<br/>模型换了提示词自动适配"]
-        L5["⑤ 流程层<br/>定向回环+Pipeline Doctor+HumanGate<br/>管线自愈，卡住了不用人救"]
-        
-        L1 --> L2 --> L3 --> L4 --> L5
+        M1["① 记忆层 · 断点恢复"]
+        M2["② 上下文层 · ContextPackage 物化"]
+        M3["③ 防幻觉层 · EXIT 指纹 + 三道闸门"]
+        M4["④ 提示词层 · CPOO 生成 + 场景适配"]
+        M5["⑤ 流程层 · 定向回环 + 管线自愈"]
+        M1 --> M2 --> M3 --> M4 --> M5
     end
-    
-    Agent["🤖 Agent 产出"] --> L3
-    L3 -->|PASS| Next["→ 下游 Agent"]
-    L3 -->|FAIL| Loop["⟲ 定向回环"]
+
+    A["Agent 产出"] --> M3
+    M3 -->|"PASS"| N["下游 Agent"]
+    M3 -->|"FAIL"| L["定向回环"]
 ```
 
 | 层级 | 解决的痛点 | 没有这层会怎样 |
@@ -58,36 +57,24 @@ flowchart TB
 
 ## 核心设计：双脑架构
 
-```
-你说 "做一个电商后台，FastAPI+Vue，支持OAuth登录"
+```mermaid
+flowchart TB
+    subgraph DB["设计脑 · Design-time · 单次 LLM 调用"]
+        direction TB
+        D1["自然语言需求"] --> D2["拆解 Agent 团队<br/>分配模型"]
+        D2 --> D3["config.json<br/>prompts"]
+    end
 
-  ┌────────────────────────────────────────────┐
-  │  🧠 设计脑 (Design Brain)                     │
-  │                                              │
-  │  分析项目 → 拆解为 Agent 团队                   │
-  │  R1(需求) R2(设计) R4(后端) R5(前端) R6(安全)    │
-  │                                              │
-  │  Platform Advisor 决定模型分配:                 │
-  │  R1,R2 → 本地 Ollama (免费, 轻量任务)           │
-  │  R4,R5 → 百炼 qwen-coder-plus (代码质量)       │
-  │  R6    → 本地 Ollama (敏感代码不出本机)          │
-  │                                              │
-  │  输出: config.json                            │
-  └──────────────────┬───────────────────────────┘
-                     ↓
-  ┌──────────────────────────────────────────────┐
-  │  ⚙️ 执行脑 (Execution Brain)                    │
-  │                                                │
-  │  R1 ──→ [Quality Gate] ──→ R2 ──→ [Gate] ──→ R4 │
-  │   ↑         ↓FAIL              ↑    ↓FAIL       │
-  │   └── 定向回环 ────────────────┘    └── 回环 ────│
-  │                                                │
-  │  每步验证:                                       │
-  │  - EXIT_CODE 指纹 (防伪造)                       │
-  │  - 契约交叉验证 (声称产出 vs 实际文件)              │
-  │  - 提示词CPOO评分 (≥80分才放行)                   │
-  │  - 工具白名单风控                                 │
-  └──────────────────────────────────────────────┘
+    D3 -->|"HumanGate 确认"| E1
+
+    subgraph EB["执行脑 · Run-time · 纯规则引擎"]
+        direction LR
+        E1["R1 需求"] --> G1{"闸门"}
+        G1 -->|"PASS"| E2["R2 设计"] --> G2{"闸门"}
+        G2 -->|"PASS"| E4["R4 后端"]
+        G1 -->|"FAIL"| E1
+        G2 -->|"FAIL"| E2
+    end
 ```
 
 设计脑用 LLM 做规划（需要创造力），执行脑用纯规则引擎做验证（需要可靠性）。这是刻意的不对称设计——**规划可以模糊，执行必须精确。** LLM 可能会胡说，但 `subprocess.run()` 不会。
@@ -96,7 +83,7 @@ flowchart TB
 
 ## 跟其他框架的区别
 
-AgentGate **是一个独立的多 Agent 可靠性框架**——跟 LangGraph/CrewAI 是**同级产品，不同方向**。别人做编排复杂度、协作、模型智能；AgentGate 编排做减法（串行+并行），可靠性做加法（验证+回环+自愈）。`pip install agent-gate` 即可使用，不依赖任何其他 Agent 框架。
+AgentGate **是一个独立的多 Agent 可靠性框架**——跟 LangGraph/CrewAI 是**同级产品，不同方向**。别人做编排复杂度、协作、模型智能；AgentGate 编排做减法（串行+并行），可靠性做加法（验证+回环+自愈）。clone 即可使用，不依赖任何其他 Agent 框架。
 
 | | LangChain | CrewAI | LangGraph | Dify | AutoGen | **AgentGate** |
 |------|-----------|--------|-----------|------|---------|-----------|
@@ -229,22 +216,18 @@ session_id = gate.save()  # 保存状态，下次可恢复
 
 ### 3. 怎么保证质量
 
+```mermaid
+flowchart LR
+    A["Agent 产出"] --> B["① 文件存在性"] --> C["② EXIT 指纹"] --> D["③ 契约交叉验证"] --> E["④ CPOO 评分"] --> F["⑤ 工具风控"]
+    F -->|"PASS"| N["传给下游 Agent"]
+    B -->|"FAIL"| L["定向回环"]
+    C -->|"FAIL"| L
+    D -->|"FAIL"| L
+    E -->|"FAIL"| L
+    F -->|"FAIL"| L
 ```
-Agent 产出
-  ↓
-① 文件存在性检查 (Part A 文件是否真实存在且非空)
-  ↓
-② EXIT_CODE 指纹验证 (Bash 命令必须输出 EXIT:0, Agent 不能伪造)
-  ↓
-③ 契约交叉验证 (Agent 声称产出了 main.py → 实际检查磁盘)
-  ↓
-④ CPOO 提示词评分 (提示词质量≥80分, <60分自动优化)
-  ↓
-⑤ 工具白名单风控 (高风险工具强制门禁, 越权自动拦截)
-  ↓
-通过 → 传给下一个 Agent
-失败 → 定向回环 (回退到出问题的那个 Agent, 不是盲目重启)
-```
+
+任一步验证失败 → 定向回环：回退到出问题的那个 Agent（不是盲目重启整个管线）。
 
 ---
 
@@ -252,7 +235,7 @@ Agent 产出
 
 这些不是理论推演，是跑了 100+ 次多 Agent 管线后发现的反模式：
 
-| 🩸 反模式 | 表现 | AgentGate 怎么防 |
+| 反模式 | 表现 | AgentGate 怎么防 |
 |-----------|------|-----------------|
 | **CSS 同名覆盖** | 两个 CSS 文件有同名选择器，后者静默覆盖前者。改了 3 轮才发现 | 契约验证检测到文件变更但效果不匹配时触发警告 |
 | **数据库幽灵库** | 相对路径 `./data/db.sqlite` → 工作目录变化 → 连到空库 → 表「丢了」 | EXIT 指纹验证启动时检查数据库连接 |
@@ -286,8 +269,7 @@ agent_gate/
 │       ├── 02_quality_gate.md        ← 质量闸门判定逻辑
 │       └── 03_oriented_loopback.md   ← 定向回环机制
 ├── configs/                   ← 配置模板
-├── tests/test_core.py         ← 76 个测试
-└── memory/                    ← 项目记忆
+└── tests/test_core.py         ← 76 个测试
 ```
 
 ---
@@ -329,7 +311,7 @@ AgentGate 是开源项目（MIT），可自由使用。如果你需要：
 - **内网/离线 AI 部署方案** — Ollama + Qwen + AgentGate，不依赖外网的生产级可靠性
 - **定制化闸门规则** — 针对你的业务场景定制验证逻辑
 
-📧 欢迎通过 [GitHub Issues](https://github.com/zw-onemaker-ai/agent_gate/issues) 或 [Discussions](https://github.com/zw-onemaker-ai/agent_gate/discussions) 联系。
+欢迎通过 [GitHub Issues](https://github.com/zw-onemaker-ai/agent_gate/issues) 或 [Discussions](https://github.com/zw-onemaker-ai/agent_gate/discussions) 联系。
 
 ---
 
