@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1F4E79"/>
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B23B3B"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="32" text-anchor="middle" font-size="14" font-weight="bold" fill="#111827">AgentGate — Five-Layer Reliability Operating System</text>
+  <text x="500" y="50" text-anchor="middle" font-size="10.5" fill="#6B7A8A">Each layer addresses one recurring failure class in multi-agent pipelines</text>
+
+  <!-- Layer 1 -->
+  <rect x="190" y="84" width="540" height="84" fill="#FBFBFD" stroke="#9AA7B5" stroke-width="1"/>
+  <rect x="200" y="106" width="32" height="32" fill="#FFFFFF" stroke="#1F4E79" stroke-width="1"/>
+  <text x="216" y="127" text-anchor="middle" font-size="13" font-weight="bold" fill="#1F4E79">①</text>
+  <text x="246" y="121" font-size="12.5" font-weight="bold" fill="#2C3E50">记忆层 Memory</text>
+  <text x="246" y="138" font-size="10" fill="#5A6B7B">Project Memory · Session Log · Anti-bloat Trimming · Checkpoint Resume</text>
+
+  <!-- Layer 2 -->
+  <rect x="190" y="182" width="540" height="84" fill="#FBFBFD" stroke="#9AA7B5" stroke-width="1"/>
+  <rect x="200" y="204" width="32" height="32" fill="#FFFFFF" stroke="#1F4E79" stroke-width="1"/>
+  <text x="216" y="225" text-anchor="middle" font-size="13" font-weight="bold" fill="#1F4E79">②</text>
+  <text x="246" y="219" font-size="12.5" font-weight="bold" fill="#2C3E50">上下文层 Context</text>
+  <text x="246" y="236" font-size="10" fill="#5A6B7B">ContextPackage Materialization · Context Card · 3-tier Budget</text>
+
+  <!-- Layer 3 (highlighted) -->
+  <rect x="190" y="280" width="540" height="84" fill="#EDF3FA" stroke="#1F4E79" stroke-width="1.5"/>
+  <rect x="200" y="302" width="32" height="32" fill="#1F4E79"/>
+  <text x="216" y="323" text-anchor="middle" font-size="13" font-weight="bold" fill="#FFFFFF">③</text>
+  <text x="246" y="317" font-size="12.5" font-weight="bold" fill="#1F4E79">防幻觉层 Anti-Hallucination</text>
+  <text x="246" y="334" font-size="10" fill="#5A6B7B">EXIT-code Fingerprint · Quality Gate · Contract Cross-verification</text>
+
+  <!-- Layer 4 -->
+  <rect x="190" y="378" width="540" height="84" fill="#FBFBFD" stroke="#9AA7B5" stroke-width="1"/>
+  <rect x="200" y="400" width="32" height="32" fill="#FFFFFF" stroke="#1F4E79" stroke-width="1"/>
+  <text x="216" y="421" text-anchor="middle" font-size="13" font-weight="bold" fill="#1F4E79">④</text>
+  <text x="246" y="415" font-size="12.5" font-weight="bold" fill="#2C3E50">提示词层 Prompt</text>
+  <text x="246" y="432" font-size="10" fill="#5A6B7B">CPOO 5-module Generation · Scenario Adaptation · Self-iteration</text>
+
+  <!-- Layer 5 -->
+  <rect x="190" y="476" width="540" height="84" fill="#FBFBFD" stroke="#9AA7B5" stroke-width="1"/>
+  <rect x="200" y="498" width="32" height="32" fill="#FFFFFF" stroke="#1F4E79" stroke-width="1"/>
+  <text x="216" y="519" text-anchor="middle" font-size="13" font-weight="bold" fill="#1F4E79">⑤</text>
+  <text x="246" y="513" font-size="12.5" font-weight="bold" fill="#2C3E50">流程层 Flow</text>
+  <text x="246" y="530" font-size="10" fill="#5A6B7B">Oriented Loopback · Pipeline Doctor · HumanGate</text>
+
+  <!-- Inter-layer arrows -->
+  <line x1="460" y1="168" x2="460" y2="178" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="460" y1="266" x2="460" y2="276" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="460" y1="364" x2="460" y2="374" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="460" y1="462" x2="460" y2="472" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <!-- Input: Agent Output -->
+  <rect x="26" y="296" width="140" height="52" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="96" y="318" text-anchor="middle" font-size="11" font-weight="bold" fill="#2C3E50">Agent Output</text>
+  <text x="96" y="334" text-anchor="middle" font-size="9" fill="#6B7A8A">unverified</text>
+  <line x1="166" y1="322" x2="188" y2="322" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Output: Downstream -->
+  <rect x="790" y="296" width="184" height="52" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="882" y="318" text-anchor="middle" font-size="11" font-weight="bold" fill="#2C3E50">Downstream Agent</text>
+  <text x="882" y="334" text-anchor="middle" font-size="9" fill="#6B7A8A">verified input</text>
+  <line x1="732" y1="308" x2="788" y2="308" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="760" y="300" text-anchor="middle" font-size="10" font-weight="bold" fill="#1F6F43">PASS</text>
+
+  <!-- FAIL loopback (outer path) -->
+  <path d="M 732 336 L 770 336 L 770 590 L 120 590 L 120 366 L 186 366" fill="none" stroke="#B23B3B" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arrRed)"/>
+  <text x="780" y="580" font-size="9.5" fill="#B23B3B">FAIL · oriented loopback</text>
+
+  <!-- Legend -->
+  <rect x="352" y="600" width="296" height="1" fill="none"/>
+  <line x1="352" y1="606" x2="392" y2="606" stroke="#1F4E79" stroke-width="1.3"/>
+  <text x="398" y="609" font-size="9.5" fill="#5A6B7B">data flow</text>
+  <line x1="480" y1="606" x2="520" y2="606" stroke="#B23B3B" stroke-width="1.3" stroke-dasharray="5 4"/>
+  <text x="526" y="609" font-size="9.5" fill="#5A6B7B">control flow (FAIL)</text>
+</svg>

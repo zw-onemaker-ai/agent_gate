@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 540" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1F4E79"/>
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B23B3B"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="32" text-anchor="middle" font-size="14" font-weight="bold" fill="#111827">Two-Brain Architecture</text>
+  <text x="500" y="50" text-anchor="middle" font-size="10.5" fill="#6B7A8A">Design-time LLM planning vs. run-time deterministic execution</text>
+
+  <!-- ===== Left: Design Brain ===== -->
+  <rect x="30" y="74" width="430" height="380" fill="#FBFBFD" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="50" y="97" font-size="12.5" font-weight="bold" fill="#2C3E50">设计脑 Design Brain</text>
+  <text x="50" y="113" font-size="9.5" fill="#6B7A8A">Design-time · single LLM invocation · offline after config</text>
+
+  <rect x="50" y="128" width="390" height="38" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="245" y="151" text-anchor="middle" font-size="10.5" fill="#2C3E50">Natural-language requirement</text>
+
+  <line x1="245" y1="166" x2="245" y2="180" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <rect x="50" y="182" width="390" height="38" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="245" y="205" text-anchor="middle" font-size="10.5" fill="#2C3E50">Task decomposition → agent team</text>
+
+  <line x1="245" y1="220" x2="245" y2="234" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <rect x="50" y="236" width="390" height="38" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="245" y="259" text-anchor="middle" font-size="10.5" fill="#2C3E50">Tool allocation &amp; topology</text>
+
+  <line x1="245" y1="274" x2="245" y2="288" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <rect x="50" y="290" width="390" height="38" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="245" y="313" text-anchor="middle" font-size="10.5" fill="#2C3E50">Model assignment per agent (Platform Advisor)</text>
+
+  <line x1="245" y1="328" x2="245" y2="342" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <rect x="50" y="344" width="390" height="38" fill="#EDF3FA" stroke="#1F4E79" stroke-width="1.5"/>
+  <text x="245" y="367" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#1F4E79">config.json + prompts/*.md</text>
+
+  <text x="50" y="408" font-size="9" font-style="italic" fill="#6B7A8A">Fuzzy planning allowed — correctness is enforced later by gates</text>
+  <text x="50" y="424" font-size="9" fill="#5A6B7B">Self-check: schema validation before output; gaps → structured questions</text>
+
+  <!-- Arrow: Design → Execution -->
+  <line x1="420" y1="363" x2="526" y2="363" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="473" y="355" text-anchor="middle" font-size="10" font-weight="bold" fill="#2C3E50">HumanGate</text>
+  <text x="473" y="379" text-anchor="middle" font-size="9" fill="#6B7A8A">approval</text>
+
+  <!-- ===== Right: Execution Brain ===== -->
+  <rect x="530" y="74" width="440" height="380" fill="#FBFBFD" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="550" y="97" font-size="12.5" font-weight="bold" fill="#2C3E50">执行脑 Execution Brain</text>
+  <text x="550" y="113" font-size="9.5" fill="#6B7A8A">Run-time · deterministic rules · zero LLM decisions</text>
+
+  <!-- R1 -->
+  <rect x="550" y="150" width="70" height="44" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="585" y="176" text-anchor="middle" font-size="11" font-weight="bold" fill="#2C3E50">R1</text>
+  <!-- gate 1 -->
+  <rect x="642" y="157" width="56" height="30" fill="#EDF3FA" stroke="#1F4E79" stroke-width="1"/>
+  <text x="670" y="176" text-anchor="middle" font-size="9.5" fill="#1F4E79">Gate</text>
+  <!-- R2 -->
+  <rect x="720" y="150" width="70" height="44" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="755" y="176" text-anchor="middle" font-size="11" font-weight="bold" fill="#2C3E50">R2</text>
+  <!-- gate 2 -->
+  <rect x="812" y="157" width="56" height="30" fill="#EDF3FA" stroke="#1F4E79" stroke-width="1"/>
+  <text x="840" y="176" text-anchor="middle" font-size="9.5" fill="#1F4E79">Gate</text>
+  <!-- R4 -->
+  <rect x="890" y="150" width="70" height="44" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="925" y="176" text-anchor="middle" font-size="11" font-weight="bold" fill="#2C3E50">R4</text>
+
+  <!-- forward arrows -->
+  <line x1="620" y1="172" x2="640" y2="172" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="698" y1="172" x2="718" y2="172" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="790" y1="172" x2="810" y2="172" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+  <line x1="868" y1="172" x2="888" y2="172" stroke="#1F4E79" stroke-width="1.3" marker-end="url(#arr)"/>
+
+  <!-- FAIL loopback gate1 → R1 -->
+  <path d="M 670 187 L 670 232 L 585 232 L 585 196" fill="none" stroke="#B23B3B" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrRed)"/>
+  <text x="676" y="228" font-size="8.5" fill="#B23B3B">FAIL</text>
+  <!-- FAIL loopback gate2 → R2 -->
+  <path d="M 840 187 L 840 252 L 755 252 L 755 196" fill="none" stroke="#B23B3B" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrRed)"/>
+  <text x="846" y="248" font-size="8.5" fill="#B23B3B">FAIL</text>
+
+  <!-- Per-step enforcement -->
+  <text x="550" y="312" font-size="9.5" fill="#6B7A8A">Per-step enforcement</text>
+  <rect x="550" y="322" width="96" height="26" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="598" y="339" text-anchor="middle" font-size="8.5" fill="#5A6B7B">EXIT fingerprint</text>
+  <rect x="654" y="322" width="96" height="26" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="702" y="339" text-anchor="middle" font-size="8.5" fill="#5A6B7B">Cross-verify</text>
+  <rect x="758" y="322" width="96" height="26" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="806" y="339" text-anchor="middle" font-size="8.5" fill="#5A6B7B">CPOO ≥ 80</text>
+  <rect x="862" y="322" width="96" height="26" fill="#FFFFFF" stroke="#9AA7B5" stroke-width="1"/>
+  <text x="910" y="339" text-anchor="middle" font-size="8.5" fill="#5A6B7B">Tool allowlist</text>
+
+  <text x="550" y="408" font-size="9" font-style="italic" fill="#6B7A8A">LLM may hallucinate — subprocess.run() does not</text>
+  <text x="550" y="424" font-size="9" fill="#5A6B7B">Every decision traceable: gate verdict, loopback target, retry count</text>
+
+  <!-- Bottom contrast -->
+  <text x="500" y="492" text-anchor="middle" font-size="11" font-weight="bold" fill="#2C3E50">规划可以模糊，执行必须精确</text>
+  <text x="500" y="510" text-anchor="middle" font-size="9.5" fill="#6B7A8A">design may be fuzzy — execution must be exact</text>
+</svg>

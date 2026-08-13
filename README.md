@@ -26,22 +26,8 @@
 
 AgentGate 不是在 Agent 外面加一层薄薄的校验——它是一套完整的 **5 层可靠性操作系统**，每层解决一类重复出现的多 Agent 协作问题：
 
-```mermaid
-flowchart TB
-    subgraph OS["AgentGate · 5 层可靠性 OS"]
-        direction TB
-        M1["① 记忆层 · 断点恢复"]
-        M2["② 上下文层 · ContextPackage 物化"]
-        M3["③ 防幻觉层 · EXIT 指纹 + 三道闸门"]
-        M4["④ 提示词层 · CPOO 生成 + 场景适配"]
-        M5["⑤ 流程层 · 定向回环 + 管线自愈"]
-        M1 --> M2 --> M3 --> M4 --> M5
-    end
-
-    A["Agent 产出"] --> M3
-    M3 -->|"PASS"| N["下游 Agent"]
-    M3 -->|"FAIL"| L["定向回环"]
-```
+<p align="center"><img src="docs/images/five_layers.svg" width="860" alt="五层可靠性架构图"></p>
+<p align="center"><sub><b>图 1</b> AgentGate 五层可靠性架构。每层解决一类多 Agent 协作失效模式；实线为数据流，虚线为控制流。</sub></p>
 
 | 层级 | 解决的痛点 | 没有这层会怎样 |
 |------|-----------|--------------|
@@ -57,25 +43,8 @@ flowchart TB
 
 ## 核心设计：双脑架构
 
-```mermaid
-flowchart TB
-    subgraph DB["设计脑 · Design-time · 单次 LLM 调用"]
-        direction TB
-        D1["自然语言需求"] --> D2["拆解 Agent 团队<br/>分配模型"]
-        D2 --> D3["config.json<br/>prompts"]
-    end
-
-    D3 -->|"HumanGate 确认"| E1
-
-    subgraph EB["执行脑 · Run-time · 纯规则引擎"]
-        direction LR
-        E1["R1 需求"] --> G1{"闸门"}
-        G1 -->|"PASS"| E2["R2 设计"] --> G2{"闸门"}
-        G2 -->|"PASS"| E4["R4 后端"]
-        G1 -->|"FAIL"| E1
-        G2 -->|"FAIL"| E2
-    end
-```
+<p align="center"><img src="docs/images/dual_brain.svg" width="860" alt="双脑架构图"></p>
+<p align="center"><sub><b>图 2</b> 双脑架构：设计脑在设计期单次调用 LLM 产出配置，执行脑在运行期以纯规则引擎执行——调度决策零 LLM 参与。</sub></p>
 
 设计脑用 LLM 做规划（需要创造力），执行脑用纯规则引擎做验证（需要可靠性）。这是刻意的不对称设计——**规划可以模糊，执行必须精确。** LLM 可能会胡说，但 `subprocess.run()` 不会。
 
@@ -216,18 +185,8 @@ session_id = gate.save()  # 保存状态，下次可恢复
 
 ### 3. 怎么保证质量
 
-```mermaid
-flowchart LR
-    A["Agent 产出"] --> B["① 文件存在性"] --> C["② EXIT 指纹"] --> D["③ 契约交叉验证"] --> E["④ CPOO 评分"] --> F["⑤ 工具风控"]
-    F -->|"PASS"| N["传给下游 Agent"]
-    B -->|"FAIL"| L["定向回环"]
-    C -->|"FAIL"| L
-    D -->|"FAIL"| L
-    E -->|"FAIL"| L
-    F -->|"FAIL"| L
-```
-
-任一步验证失败 → 定向回环：回退到出问题的那个 Agent（不是盲目重启整个管线）。
+<p align="center"><img src="docs/images/gate_pipeline.svg" width="860" alt="质量闸门流水线图"></p>
+<p align="center"><sub><b>图 3</b> 每个 Agent 交接点的五道闸门。任一闸门失败 → 定向回环到出错的 Agent（带失败上下文重试），而非盲目重启管线。</sub></p>
 
 ---
 
