@@ -203,6 +203,8 @@ else:
 
 ## 跑起来长这样
 
+把上面几段代码按顺序拼起来，存成一个 `gate_demo.py`，就能跑出下面的结果。文章里的代码是教学简化版，完整实现（含 ContextCard、三级预算、并行拓扑检测）在仓库 `src/` 下。
+
 正常情况：
 ```
 $ python gate_demo.py
@@ -253,8 +255,15 @@ def where_to_go(fail_reason, current_agent):
 
 这套东西的核心思路就一个：**别信 Agent 说的话。信命令行返回的结果。**
 
-76 个测试全过，MIT 协议，代码在 GitHub：
+76 个测试全过，MIT 协议。代码在 GitHub，clone 下来直接跑：
 
-[github.com/zw-onemaker-ai/agent_gate](https://github.com/zw-onemaker-ai/agent_gate)
+```bash
+git clone https://github.com/zw-onemaker-ai/agent_gate
+cd agent_gate
+python3 examples/demo_minimal.py --mock   # 不用模型，先看闸门和验证命令怎么生成
+python3 -m pytest                          # 76 个测试
+```
+
+仓库里还有三个可运行的 Demo：`demo_minimal.py`（最小注册）、`demo_content.py`（内容写作场景）、`demo_3role.py`（需求→代码→审查完整管线，可接 Ollama）。
 
 下一篇写「弱模型也能跑生产——Ollama + Qwen 上跑 AgentGate」，有兴趣可以 Watch。

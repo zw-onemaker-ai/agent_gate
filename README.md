@@ -165,6 +165,22 @@ python3 -c "from src.workspace import init_workspace; init_workspace()"
 # 设计脑会自动: R1→qwen-turbo(便宜) R4→qwen-coder-plus(代码强)
 ```
 
+### 三个可运行 Demo
+
+```bash
+# 不用模型，先看闸门和验证命令怎么自动生成（--mock 干跑）
+python3 examples/demo_minimal.py --mock
+python3 examples/demo_content.py --mock
+python3 examples/demo_3role.py --mock
+
+# 接真实 LLM（本地 Ollama，模型名换成你已 pull 的）
+python3 examples/demo_minimal.py --provider ollama --model qwen2.5:7b
+python3 examples/demo_3role.py --provider ollama --model qwen2.5:7b
+
+# 76 个测试
+python3 -m pytest
+```
+
 ### 支持的所有平台
 
 | 平台 | 适合场景 | 月成本参考 |
