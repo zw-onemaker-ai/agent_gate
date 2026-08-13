@@ -16,7 +16,7 @@
 
 **市面上所有多 Agent 框架默认「Agent 产出可信」。AgentGate 默认「不可信，验证过才算」。**
 
-当你让多个 AI Agent 协作完成一个项目时，怎么保证它们不互相传递垃圾？LangChain/CrewAI/AutoGen 关心的是「怎么串起来」，AgentGate 关心的是「串起来之后怎么保证端到端可靠」——每个 Agent 的输出必须通过闸门验证才能传给下一个，失败定向回环修复，管线卡死有医生自动诊断。
+当你让多个 AI Agent 协作完成一个项目时，怎么保证它们不互相传递垃圾？LangChain/CrewAI/AutoGen 关心的是「怎么串得更灵活」，AgentGate 关心的是「串起来的每一步可不可信」——每个 Agent 的输出必须通过闸门验证才能传给下一个，失败定向回环修复，管线卡死有医生自动诊断。
 
 它出身于[一人公司·产品工厂](https://github.com/zw-onemaker-ai)的实战场景：一个人管理多 AI Agent 协作，没有人工审核的奢侈，必须靠系统自身保证输出质量。
 
@@ -96,7 +96,7 @@ flowchart TB
 
 ## 跟其他框架的区别
 
-AgentGate **不是又一个 Agent 框架**——它是坐在所有 Agent 框架下面的一层可靠性基础设施。跟 LangChain/CrewAI/AutoGen 不是竞品，是互补。
+AgentGate **是一个独立的多 Agent 可靠性框架**——跟 LangGraph/CrewAI 是**同级产品，不同方向**。别人做编排复杂度、协作、模型智能；AgentGate 编排做减法（串行+并行），可靠性做加法（验证+回环+自愈）。`pip install agent-gate` 即可使用，不依赖任何其他 Agent 框架。
 
 | | LangChain | CrewAI | LangGraph | Dify | AutoGen | **AgentGate** |
 |------|-----------|--------|-----------|------|---------|-----------|
@@ -108,7 +108,7 @@ AgentGate **不是又一个 Agent 框架**——它是坐在所有 Agent 框架�
 | 提示词优化 | 无 | 无 | 无 | 无 | 无 | CPOO 五模块自动生成 |
 | 定向回环 | 无 | 无 | 条件分支 | 条件节点 | 无 | 按错误类型精确回环 |
 
-> **简单说**：LangChain/CrewAI 帮你「让 Agent 跑起来」。AgentGate 帮你「让 Agent 可靠地跑下去」。
+> **简单说**：LangChain/CrewAI 把力气花在编排的灵活性。AgentGate 把力气花在调用的可靠性——单步调用无所谓，步数越多越值钱。别人都在造引擎，刹车赛道是空的。
 
 ---
 

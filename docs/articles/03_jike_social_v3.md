@@ -32,7 +32,7 @@ LangChain、CrewAI、AutoGen、Dify——都是好东西。但它们全都默认
 
 Agent 说写了文件但没写，说跑了测试但没跑，改了接口但不通知下游。这些不是偶发 bug，是系统性漏洞。因为没有一个框架在 Agent 之间放了一道验证。
 
-AgentGate 就是干这个的。坐在所有 Agent 框架下面，管记忆、管上下文、管幻觉拦截、管提示词质量、管流程自愈。
+AgentGate 就是干这个的。跟它们是同级产品、不同方向——管记忆、管上下文、管幻觉拦截、管提示词质量、管流程自愈。
 
 Agent管编，闸门管信。
 github.com/zw-onemaker-ai/agent_gate

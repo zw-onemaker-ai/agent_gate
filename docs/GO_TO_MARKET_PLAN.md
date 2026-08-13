@@ -15,7 +15,7 @@
 市面上所有多Agent框架（LangChain/CrewAI/AutoGen/Dify）默认假设「Agent产出可信」——agent_gate 默认「不可信，验证过才算」。
 
 ### 差异化
-不是「又一个Agent框架」，是坐在所有Agent框架下面的一层**可靠性操作系统**。5层全栈：
+不是「又一个Agent框架」，是跟 LangGraph/CrewAI **同级产品、不同方向**的独立**可靠性框架**——别人做编排复杂度，agent_gate 做调用可靠性。5层全栈：
 
 | 层级 | 解决的问题 | agent_gate 方案 |
 |------|-----------|----------------|
@@ -64,7 +64,7 @@ GitHub Star / README 浏览
 | # | 任务 | 产出 | 优先级 |
 |:--:|------|------|:--:|
 | 1.1 | **深度技术文章**：「我跑了100+次多Agent管线，发现5类重复出现的可靠性问题」→ 5个问题+5层方案+架构图 | 1篇主文章（~3000字） | 🔴 |
-| 1.2 | **框架对比页**：agent_gate vs LangGraph/CrewAI/AutoGen/Dify——不是竞品，是互补的可靠性层 | 1篇对比文档 | 🔴 |
+| 1.2 | **框架对比页**：agent_gate vs LangGraph/CrewAI/AutoGen/Dify——同级产品，方向不同：他们做编排/协作/智能，agent_gate 做可靠性 | 1篇对比文档 | 🔴 |
 | 1.3 | 文章配套的 Mermaid 架构图 + 流程图 | 3-5张图 | 🟡 |
 
 ### Phase 2 · 分发（Day 7-14）
