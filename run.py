@@ -44,6 +44,91 @@ def list_configs():
             print("  {} — [ERROR: {}]".format(f.stem, e))
 
 
+
+def _resolve_env_value(value):
+    # type: (str) -> str
+    """Resolve ${ENV_VAR} placeholders from the environment."""
+    if value and value.startswith("${") and value.endswith("}"):
+        return os.environ.get(value[2:-1], "")
+    return value
+
+
+def run_check_models(config_path=None):
+    # type: (str) -> int
+    """Probe a provider's live model catalog and check the config registry.
+
+    Standalone (no --config): probes Bailian with DASHSCOPE_API_KEY if set.
+    With --config: probes the first provider entry whose key resolves.
+    Exit codes: 0 = probe succeeded, 1 = no key / probe failed.
+    """
+    from src.model_discovery import (
+        ModelDiscoveryError, check_registry, fetch_model_catalog, pick_model)
+
+    base_url = ""
+    api_key = ""
+    registry_names = []
+    provider_name = ""
+
+    if config_path:
+        cfg = load_config(config_path)
+        providers_cfg = cfg.get("providers", {})
+        registry = (cfg.get("models") or {}).get("registry", {})
+        registry_names = list(registry.keys())
+        for pname, pcfg in providers_cfg.items():
+            key = _resolve_env_value(pcfg.get("api_key", ""))
+            if key:
+                provider_name = pname
+                base_url = pcfg.get("base_url", "")
+                api_key = key
+                break
+        if not base_url:
+            expected = [pcfg.get("api_key", "") for pcfg in providers_cfg.values()]
+            print("No provider key found in environment.")
+            print("Expected env vars: {}".format(", ".join(expected)))
+            return 1
+    else:
+        key = os.environ.get("DASHSCOPE_API_KEY", "")
+        if not key:
+            print("No API key found. Set one first, e.g.:")
+            print("  export DASHSCOPE_API_KEY=\"sk-...\"   # Bailian")
+            print("  export ARK_API_KEY=\"...\"            # Volcano")
+            return 1
+        provider_name = "bailian"
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        api_key = key
+
+    print("Model Catalog Check")
+    print("  Provider : {}".format(provider_name))
+    print("  Base URL : {}".format(base_url))
+    try:
+        catalog = fetch_model_catalog(base_url, api_key)
+    except ModelDiscoveryError as e:
+        print("  ❌ {}".format(e.message))
+        return 1
+
+    chat_catalog = [m for m in catalog]
+    print("  Live models: {}".format(len(chat_catalog)))
+    for m in sorted(chat_catalog):
+        print("    - {}".format(m))
+
+    if registry_names:
+        result = check_registry(catalog, registry_names)
+        if result["missing"]:
+            print("  Registry check:")
+            for name in result["missing"]:
+                hint = result["suggestions"].get(name)
+                suffix = " (suggest: {})".format(hint) if hint else ""
+                print("    - {} → ❌ NOT in live catalog{}".format(name, suffix))
+        else:
+            print("  Registry check: all {} names alive ✓".format(len(registry_names)))
+
+    print("  Tier picks:")
+    for tier in ("strong", "balanced", "cheap"):
+        picked = pick_model(catalog, tier)
+        print("    {:8} → {}".format(tier, picked or "(no chat model)"))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AgentGate — AI Agent Quality Framework")
@@ -57,6 +142,8 @@ def main():
                         help="Model name")
     parser.add_argument("--mock", action="store_true",
                         help="Dry-run without LLM")
+    parser.add_argument("--check-models", action="store_true",
+                        help="Probe provider /models endpoint and check registry names")
     parser.add_argument("--list", action="store_true",
                         help="List available configs")
     parser.add_argument("--output", "-o", default="",
@@ -67,6 +154,9 @@ def main():
     if args.list:
         list_configs()
         return
+
+    if args.check_models:
+        sys.exit(run_check_models(config_path=args.config or None))
 
     if not args.config:
         print("Usage: python run.py --config <config.json> [idea]")
