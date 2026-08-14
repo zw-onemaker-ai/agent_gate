@@ -150,9 +150,9 @@ def test_align_replaces_stale_knowledge_with_live_catalog(monkeypatch, tmp_path)
     rc = run_design("Build a Todo API", auto_confirm=False, expand=False)
     assert rc == 1
     saved = json_mod.load(open(str(tmp_path / "output/stale_design/design_config.json")))
-    # base_url 对齐到工作区 (token-plan)
-    assert saved["providers"]["dashscope"]["base_url"] == "http://x/v1"
-    assert saved["providers"]["dashscope"]["api_key"] == "${DASHSCOPE_API_KEY}"
+    # base_url 对齐到工作区 (token-plan), 键名统一为 brain_provider (litellm)
+    assert saved["providers"]["litellm"]["base_url"] == "http://x/v1"
+    assert saved["providers"]["litellm"]["api_key"] == "${DASHSCOPE_API_KEY}"
     # registry 重建为实时档位, 旧名 qwen-turbo 消失
     reg = saved["models"]["registry"]
     assert "qwen-turbo" not in reg
@@ -164,3 +164,72 @@ def test_align_replaces_stale_knowledge_with_live_catalog(monkeypatch, tmp_path)
     # raw key 不落盘
     raw = open(str(tmp_path / "output/stale_design/design_config.json")).read()
     assert "sk-local" not in raw
+
+
+RAW_DESIGN_SCHEMA = {
+    "meta": {"project": "raw_schema_design"},
+    "project": {"name": "raw_schema_design", "description": "t"},
+    "providers": {"dashscope": {"type": "api",
+                                "base_url": "https://old.example.com/v1"}},
+    "models": {"default": "qwen-turbo",
+               "registry": {"qwen-turbo": {"provider": "dashscope",
+                                           "model": "qwen-turbo"}}},
+    "agents": [
+        {"role": "R1", "name": "需求分析", "role_goal": "analyze",
+         "output_file": "requirements.md"},
+        {"role": "R4", "name": "后端开发", "role_goal": "implement",
+         "output_file": "app.py"},
+    ],
+    "topology": {"stages": [
+        {"stage": 1, "agents": ["R1"], "mode": "serial"},
+        {"stage": 2, "agents": ["R4"], "mode": "serial", "on_fail": "R1"},
+    ]},
+    "context": {"routes": [
+        {"agent": "R4", "requires": ["requirements.md", "app.py"]},
+    ]},
+    "design_notes": {
+        "why_these_agents": "需求先行, 后端实现",
+        "topology_strategy": "串行保证依赖顺序",
+        "model_strategy": "按任务复杂度分配模型",
+    },
+}
+
+
+def test_design_raw_schema_normalized_to_engine_schema(monkeypatch, tmp_path):
+    """设计脑原生 schema 偏差 (dashscope键/routes格式/design_notes字段)
+    必须被校正层归一化为引擎可加载格式 (v1.3.3+)。"""
+    _ws_env(monkeypatch, tmp_path)
+    live_catalog = ["qwen3.7-plus"]
+    monkeypatch.setattr("src.model_discovery.fetch_model_catalog",
+                        lambda base_url, api_key, timeout=10: live_catalog)
+    monkeypatch.setattr("src.design_cli.fetch_model_catalog",
+                        lambda base_url, api_key, timeout=10: live_catalog)
+    monkeypatch.setattr("src.design_cli.LLMClient",
+                        lambda **kw: _FakeClient([json_mod.dumps(RAW_DESIGN_SCHEMA)]))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    rc = run_design("raw schema", auto_confirm=False, expand=False)
+    assert rc == 1  # HumanGate 处中止
+    saved = json_mod.load(
+        open(str(tmp_path / "output/raw_schema_design/design_config.json")))
+    # providers 键名统一为 brain_provider (litellm)
+    assert "litellm" in saved["providers"]
+    assert "dashscope" not in saved["providers"]
+    assert saved["providers"]["litellm"]["base_url"] == "http://x/v1"
+    # registry provider 与 providers 键一致 (否则 build_pipeline 查不到 → base_url 静默丢失)
+    for entry in saved["models"]["registry"].values():
+        assert entry["provider"] in saved["providers"]
+    # routes → 引擎 from/to 格式
+    routes = saved["context"]["routes"]
+    assert all("from" in r and "to" in r for r in routes)
+    assert {"from": "R1", "to": "R4", "files": ["requirements.md"]} in routes
+    # 自引用文件 (app.py 是 R4 自己产的) 不产生路由
+    assert not any(r["files"] == ["app.py"] for r in routes)
+    # design_notes 未知字段折入 why_these_agents
+    dn = saved["design_notes"]
+    assert "topology_strategy" not in dn and "model_strategy" not in dn
+    assert "topology_strategy" in dn.get("why_these_agents", "")
+    assert "model_strategy" in dn.get("why_these_agents", "")
+    # 引擎 load_config 可直接加载 (无校验错误)
+    from src.config_loader import load_config
+    load_config(str(tmp_path / "output/raw_schema_design/design_config.json"))

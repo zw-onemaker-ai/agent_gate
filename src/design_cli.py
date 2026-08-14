@@ -96,6 +96,94 @@ def _align_config_with_live_catalog(config, ws):
     return config
 
 
+def _normalize_design_schema(config, ws):
+    # type: (dict, object) -> dict
+    """校正设计脑产出的 schema 偏差 → 与引擎 load_config 对齐 (v1.3.3+)。
+
+    设计脑(LLM)的离线知识不可靠, 除了 base_url/registry 对齐外, 其 schema 也
+    可能与引擎不一致。此函数保证落盘的 design_config.json 可被 load_config
+    直接加载 + build_pipeline 直接执行:
+
+    1. providers 键名统一为 ws.brain_provider (设计脑可能叫 dashscope 等,
+       而 llm_client 只认 ollama/openai/litellm → 键名不一致会导致
+       build_pipeline 查不到 provider → base_url 静默丢失)
+    2. models.registry 的 provider 必须存在于 providers
+    3. context.routes: {agent, requires} → {from, to, files} (引擎格式)
+    4. design_notes 未知字段 → 折入 why_these_agents (保留设计脑推理)
+    """
+    # 1: providers 键名统一
+    providers = config.get("providers") or {}
+    if ws.brain_provider and ws.brain_provider not in providers:
+        renamed = {}
+        for pname, pcfg in providers.items():
+            if pname != ws.brain_provider and ws.brain_provider not in renamed:
+                renamed[ws.brain_provider] = pcfg  # 首个外来键 → 改名为 brain_provider
+            else:
+                renamed[pname] = pcfg
+        providers = renamed
+    if providers:
+        config["providers"] = providers
+    elif ws.brain_provider:
+        config["providers"] = {ws.brain_provider: {}}
+
+    # 2: registry provider 一致性
+    models = config.get("models") or {}
+    for entry in (models.get("registry") or {}).values():
+        if entry.get("provider") not in (providers or {}):
+            entry["provider"] = ws.brain_provider
+
+    # 3: routes {agent, requires} → {from, to, files}
+    producer_by_file = {}
+    for agent in config.get("agents", []):
+        out = agent.get("output_file")
+        role = agent.get("role")
+        if out and role:
+            producer_by_file.setdefault(out, role)
+
+    ctx = config.get("context") or {}
+    routes = ctx.get("routes") or []
+    normalized = []
+    seen = set()
+    engine_format = False
+    for route in routes:
+        if "from" in route and "to" in route:
+            engine_format = True
+            normalized.append(route)  # 已是引擎格式 → 原样保留
+            continue
+        agent = route.get("agent")
+        for fname in (route.get("requires") or []):
+            producer = producer_by_file.get(fname)
+            if not producer or producer == agent:
+                continue
+            key = (producer, agent, fname)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({"from": producer, "to": agent, "files": [fname]})
+    if normalized or engine_format:
+        ctx["routes"] = normalized
+        config["context"] = ctx
+    else:
+        ctx.pop("routes", None)  # 全部无法解析 → 移除无效 routes
+        if ctx:
+            config["context"] = ctx
+
+    # 4: design_notes 未知字段折入 why_these_agents
+    design = config.get("design_notes") or {}
+    allowed = {"why_these_agents", "gaps_found", "risks"}
+    folded = []
+    for key in list(design.keys()):
+        if key not in allowed:
+            folded.append("{}: {}".format(key, design.pop(key)))
+    if folded:
+        base = design.get("why_these_agents") or ""
+        design["why_these_agents"] = (
+            base + (" | " if base else "") + " | ".join(folded))
+    if design:
+        config["design_notes"] = design
+    return config
+
+
 def run_design(description, auto_confirm=False, expand=True):
     # type: (str, bool, bool) -> int
     """Design brain → HumanGate → execution brain. Exit codes: 0 ok, 1 abort."""
@@ -135,6 +223,7 @@ def run_design(description, auto_confirm=False, expand=True):
             print("  (prompt expansion skipped: {})".format(e))
 
     config = _align_config_with_live_catalog(config, ws)
+    config = _normalize_design_schema(config, ws)
 
     # Validate + persist
     meta = config.get("meta", {})
@@ -150,6 +239,13 @@ def run_design(description, auto_confirm=False, expand=True):
     cfg_path = os.path.join(output_dir, "design_config.json")
     with open(cfg_path, "w") as f:
         json_mod.dump(config, f, indent=2, ensure_ascii=False)
+
+    # Schema self-check — 执行脑能跑的前置保障 (v1.3.3+)
+    try:
+        load_config(cfg_path)
+        print("  Schema check : OK (engine-loadable)")
+    except Exception as e:
+        print("  Schema check : ⚠️ {}".format(e))
 
     # ── ⑤ HumanGate ──
     print("── Pipeline plan ──")
