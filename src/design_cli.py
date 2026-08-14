@@ -17,6 +17,7 @@ import sys
 
 from .config_loader import build_pipeline, load_config
 from .llm_client import LLMClient
+from .model_discovery import check_registry, fetch_model_catalog, pick_model
 from .orchestrator_agent import expand_prompts, generate_pipeline_config
 from .workspace import detect_workspace
 
@@ -35,6 +36,64 @@ def _make_brain_caller(client):
         return content
 
     return call_llm
+
+
+def _align_config_with_live_catalog(config, ws):
+    # type: (dict, object) -> dict
+    """校正设计脑的离线知识 — 运行时清单是权威。
+
+    1. providers.base_url 以工作区为准 (计划专属域名等)
+    2. providers 缺 api_key → 注入环境变量占位符 (不落盘 raw key)
+    3. models.registry 用实时清单重建 (strong/balanced/cheap 档位实选)
+    4. agent.model 若不在实时清单 → 移除 (回落到 models.default)
+    """
+    if not ws.brain_api_key or not ws.brain_base_url:
+        return config
+
+    try:
+        catalog = fetch_model_catalog(ws.brain_base_url, ws.brain_api_key)
+    except Exception:
+        return config
+    if not catalog:
+        return config
+
+    # 1+2: providers 对齐
+    providers = config.get("providers") or {}
+    if providers:
+        for pname, pcfg in providers.items():
+            pcfg["base_url"] = ws.brain_base_url
+            if not pcfg.get("api_key"):
+                pcfg["api_key"] = "${DASHSCOPE_API_KEY}"
+        config["providers"] = providers
+    else:
+        config["providers"] = {
+            ws.brain_provider: {
+                "base_url": ws.brain_base_url,
+                "api_key": "${DASHSCOPE_API_KEY}",
+            }
+        }
+
+    # 3: registry 用实时清单档位重建
+    tiers = {}
+    for tier in ("strong", "balanced", "cheap"):
+        picked = pick_model(catalog, tier)
+        if picked:
+            tiers[tier] = picked
+    if tiers:
+        models = config.get("models") or {}
+        models["registry"] = {
+            m: {"provider": ws.brain_provider, "model": m}
+            for m in sorted(set(tiers.values()))
+        }
+        if models.get("default") not in catalog:
+            models["default"] = tiers.get("balanced") or ws.brain_model
+        config["models"] = models
+
+    # 4: agent.model 过期字段清理
+    for agent in config.get("agents", []):
+        if agent.get("model") and agent["model"] not in catalog:
+            agent.pop("model", None)
+    return config
 
 
 def run_design(description, auto_confirm=False, expand=True):
@@ -75,19 +134,7 @@ def run_design(description, auto_confirm=False, expand=True):
         except Exception as e:
             print("  (prompt expansion skipped: {})".format(e))
 
-    # Inject execution-brain provider settings when the designed config
-    # has none — the execution brain needs base_url + key too. Use env
-    # placeholders only; never persist the raw API key to disk.
-    if not config.get("providers") and ws.brain_base_url and ws.brain_api_key:
-        env_var = "DASHSCOPE_API_KEY"
-        if ws.brain_provider in ("openai",):
-            env_var = "OPENAI_API_KEY"
-        config["providers"] = {
-            ws.brain_provider: {
-                "base_url": ws.brain_base_url,
-                "api_key": "${{{}}}".format(env_var),
-            }
-        }
+    config = _align_config_with_live_catalog(config, ws)
 
     # Validate + persist
     meta = config.get("meta", {})

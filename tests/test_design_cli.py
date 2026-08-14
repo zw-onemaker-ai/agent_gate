@@ -108,6 +108,8 @@ def test_design_injects_provider_without_persisting_raw_key(monkeypatch, tmp_pat
     bare_config = {k: v for k, v in GOOD_CONFIG.items() if k != "providers"}
     monkeypatch.setattr("src.design_cli.LLMClient",
                         lambda **kw: _FakeClient([json_mod.dumps(bare_config)]))
+    monkeypatch.setattr("src.design_cli.fetch_model_catalog",
+                        lambda base_url, api_key, timeout=10: ["qwen3.7-plus"])
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", lambda prompt="": "n")
     rc = run_design("Build a Todo API", auto_confirm=False, expand=False)
@@ -117,3 +119,48 @@ def test_design_injects_provider_without_persisting_raw_key(monkeypatch, tmp_pat
     assert saved["providers"]["litellm"]["api_key"] == "${DASHSCOPE_API_KEY}"
     raw = open(str(tmp_path / "output/test_designed/design_config.json")).read()
     assert "sk-local" not in raw  # raw key never persisted
+
+
+STALE_CONFIG = {
+    "meta": {"project": "stale_design"},
+    "project": {"name": "stale_design", "description": "t"},
+    "providers": {"dashscope": {"type": "api",
+                                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"}},
+    "models": {"default": "qwen-turbo",
+               "registry": {"qwen-turbo": {"provider": "dashscope", "tier": "cheap"}}},
+    "agents": [
+        {"role": "R1", "name": "Req", "role_goal": "analyze",
+         "model": "qwen-turbo", "output_file": "requirements.md"},
+    ],
+    "topology": {"stages": [{"agents": ["R1"]}]},
+}
+
+
+def test_align_replaces_stale_knowledge_with_live_catalog(monkeypatch, tmp_path):
+    _ws_env(monkeypatch, tmp_path)
+    live_catalog = ["qwen3.6-flash", "qwen3.7-plus", "qwen3.8-max"]
+    monkeypatch.setattr("src.model_discovery.fetch_model_catalog",
+                        lambda base_url, api_key, timeout=10: live_catalog)
+    monkeypatch.setattr("src.design_cli.fetch_model_catalog",
+                        lambda base_url, api_key, timeout=10: live_catalog)
+    monkeypatch.setattr("src.design_cli.LLMClient",
+                        lambda **kw: _FakeClient([json_mod.dumps(STALE_CONFIG)]))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+    rc = run_design("Build a Todo API", auto_confirm=False, expand=False)
+    assert rc == 1
+    saved = json_mod.load(open(str(tmp_path / "output/stale_design/design_config.json")))
+    # base_url 对齐到工作区 (token-plan)
+    assert saved["providers"]["dashscope"]["base_url"] == "http://x/v1"
+    assert saved["providers"]["dashscope"]["api_key"] == "${DASHSCOPE_API_KEY}"
+    # registry 重建为实时档位, 旧名 qwen-turbo 消失
+    reg = saved["models"]["registry"]
+    assert "qwen-turbo" not in reg
+    assert "qwen3.7-plus" in reg and reg["qwen3.7-plus"]["model"] == "qwen3.7-plus"
+    # default 校正
+    assert saved["models"]["default"] == "qwen3.7-plus"
+    # agent 过期 model 字段被清理
+    assert "model" not in saved["agents"][0]
+    # raw key 不落盘
+    raw = open(str(tmp_path / "output/stale_design/design_config.json")).read()
+    assert "sk-local" not in raw
