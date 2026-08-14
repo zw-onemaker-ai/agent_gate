@@ -162,6 +162,12 @@ def main():
                         help="Dry-run without LLM")
     parser.add_argument("--check-models", action="store_true",
                         help="Probe provider /models endpoint and check registry names")
+    parser.add_argument("--design", action="store_true",
+                        help="Design Brain: describe a project, generate and run a pipeline")
+    parser.add_argument("--yes", action="store_true",
+                        help="Auto-confirm the design plan (skip HumanGate prompt)")
+    parser.add_argument("--no-expand", action="store_true",
+                        help="Skip prompt expansion (agents keep role_goal auto-gen)")
     parser.add_argument("--list", action="store_true",
                         help="List available configs")
     parser.add_argument("--output", "-o", default="",
@@ -175,6 +181,19 @@ def main():
 
     if args.check_models:
         sys.exit(run_check_models(config_path=args.config or None))
+
+    if args.design:
+        from src.design_cli import run_design
+        idea = args.idea
+        if not idea:
+            try:
+                idea = input("Describe your project: ").strip()
+            except EOFError:
+                idea = ""
+        if not idea:
+            print("No project description given.")
+            sys.exit(1)
+        sys.exit(run_design(idea, auto_confirm=args.yes, expand=not args.no_expand))
 
     if not args.config:
         print("Usage: python run.py --config <config.json> [idea]")
