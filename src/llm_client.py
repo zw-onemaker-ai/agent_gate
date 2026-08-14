@@ -99,33 +99,51 @@ class LLMClient:
 
     def _call_litellm(self, model, system, user, base_url=None, api_key=None):
         # type: (str, str, str, str, str) -> LLMResponse
+        """OpenAI-compatible chat completion via direct HTTP.
+
+        Provider name kept as "litellm" for config compatibility, but no
+        litellm SDK dependency: any OpenAI-compatible endpoint works
+        (Bailian compatible-mode, Volcano Ark, DeepSeek, relay gateways).
+        """
+        import urllib.request
+        import urllib.error
+
+        url = (base_url or "").rstrip("/") + "/chat/completions"
+        payload = json.dumps({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user or "Proceed with your task."},
+            ],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        if api_key:
+            req.add_header("Authorization", "Bearer {}".format(api_key))
         try:
-            from litellm import completion
-            kwargs = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user or "Proceed with your task."},
-                ],
-            }
-            if base_url:
-                kwargs["api_base"] = base_url
-            if api_key:
-                kwargs["api_key"] = api_key
-            resp = completion(**kwargs)
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            content = data["choices"][0]["message"]["content"]
+            tokens = (data.get("usage") or {}).get("total_tokens", 0)
             return LLMResponse(
-                content=resp.choices[0].message.content,
-                model=model, provider="litellm",
-                tokens_used=resp.usage.total_tokens if hasattr(resp, 'usage') else 0,
+                content=content, model=model, provider="litellm",
+                tokens_used=tokens,
             )
-        except ImportError:
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:300]
+            except Exception:
+                pass
             return LLMResponse(
                 content="", model=model, provider="litellm",
-                error="LITELLM_NOT_INSTALLED: pip install litellm")
+                error="HTTP {}: {}".format(e.code, body))
         except Exception as e:
             return LLMResponse(
                 content="", model=model, provider="litellm",
-                error="LITELLM_ERROR: {}".format(e))
+                error="LLM_ERROR: {}".format(e))
 
     # ── LLM-as-Judge ──
 
