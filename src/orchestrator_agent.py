@@ -64,6 +64,8 @@ You MUST output ONLY valid JSON — no markdown fences, no explanations.
       "name": "...",
       "model": "qwen-turbo",
       "role_goal": "1-2 sentences describing what this agent does",
+      "output_file": "requirements.md",
+      "acceptance_criteria": ["3+ user stories", "each story has verifiable acceptance criteria"],
       ...
     }
   ],
@@ -80,7 +82,9 @@ You MUST output ONLY valid JSON — no markdown fences, no explanations.
 5. Context routes: for each agent R[N], list which upstream files it needs
 6. MAX 5 agents unless the project genuinely needs more
 7. Every agent's output_file must be unique
-8. Acceptance criteria must be verifiable (file exists, contains X, etc.)
+8. Each agent MUST include 2-5 acceptance_criteria — concrete verifiable checks
+   (e.g. "health endpoint returns 200", "file exists and is non-empty",
+   "pytest passes"). These drive the quality gate; agents without them are rejected.
 9. When provider has multiple models, assign cheap models to R1-R3,R9-R10 and powerful models to R4-R5
 """
 

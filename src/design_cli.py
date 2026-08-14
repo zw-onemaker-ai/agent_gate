@@ -18,7 +18,11 @@ import sys
 from .config_loader import build_pipeline, load_config
 from .llm_client import LLMClient
 from .model_discovery import check_registry, fetch_model_catalog, pick_model
-from .orchestrator_agent import expand_prompts, generate_pipeline_config
+from .orchestrator_agent import (
+    expand_prompts,
+    generate_pipeline_config,
+    _parse_llm_output,
+)
 from .workspace import detect_workspace
 
 
@@ -26,7 +30,7 @@ def _make_brain_caller(client):
     # type: (object) -> callable
     """Adapt LLMClient.call (returns LLMResult) → call_llm_fn (returns str)."""
 
-    def call_llm(system_prompt, user_prompt):
+    def call_llm(system_prompt, user_prompt=""):
         resp = client.call(system_prompt=system_prompt, user_prompt=user_prompt)
         if getattr(resp, "error", None):
             raise RuntimeError(resp.error)
@@ -184,6 +188,66 @@ def _normalize_design_schema(config, ws):
     return config
 
 
+ACCEPTANCE_FILL_PROMPT = """You are completing the pipeline config you designed for this project:
+
+{description}
+
+These agents are missing acceptance_criteria. For each, write 2-5 concrete
+verifiable acceptance criteria that match THIS project and the agent's
+role_goal (e.g. "health endpoint returns 200", "pytest passes",
+"file exists and is non-empty"):
+
+{agent_context}
+
+Output ONLY a JSON object mapping each agent role to its criteria list:
+
+{{"R1": ["criterion 1", "criterion 2"], "R4": ["criterion 1", "criterion 2"]}}"""
+
+
+def _fill_missing_acceptance(config, call_llm, description=""):
+    # type: (dict, callable, str) -> tuple
+    """验收锚定缺口检查 (v1.3.3+) — 设计脑补全回环。
+
+    每个 agent 必须有 acceptance_criteria (驱动闸门验收)。
+    缺失时回环设计脑自己补 (设计脑补自己的计划, 不人肉补)。
+    补全提示词携带项目描述 + agent role_goal, 防止设计脑跑偏到别的项目域。
+    返回 (config, still_missing_roles)。
+    """
+    missing = [
+        a.get("role", "?") for a in config.get("agents", [])
+        if not a.get("acceptance_criteria")
+    ]
+    if not missing:
+        return config, []
+
+    agent_context = "\n".join(
+        "- {} {}: {} (output: {})".format(
+            a.get("role", "?"), a.get("name", ""),
+            a.get("role_goal", ""), a.get("output_file", ""))
+        for a in config.get("agents", [])
+        if not a.get("acceptance_criteria")
+    )
+    try:
+        raw = call_llm(
+            ACCEPTANCE_FILL_PROMPT.format(
+                description=description, agent_context=agent_context),
+            "")
+        parsed = _parse_llm_output(raw) or {}
+        for agent in config.get("agents", []):
+            role = agent.get("role")
+            criteria = parsed.get(role)
+            if isinstance(criteria, list) and criteria:
+                agent["acceptance_criteria"] = [
+                    str(c) for c in criteria if str(c).strip()
+                ]
+        return config, [
+            a.get("role", "?") for a in config.get("agents", [])
+            if not a.get("acceptance_criteria")
+        ]
+    except Exception:
+        return config, missing
+
+
 def run_design(description, auto_confirm=False, expand=True):
     # type: (str, bool, bool) -> int
     """Design brain → HumanGate → execution brain. Exit codes: 0 ok, 1 abort."""
@@ -224,6 +288,8 @@ def run_design(description, auto_confirm=False, expand=True):
 
     config = _align_config_with_live_catalog(config, ws)
     config = _normalize_design_schema(config, ws)
+    config, missing_acceptance = _fill_missing_acceptance(
+        config, call_llm, description=description)
 
     # Validate + persist
     meta = config.get("meta", {})
@@ -246,6 +312,14 @@ def run_design(description, auto_confirm=False, expand=True):
         print("  Schema check : OK (engine-loadable)")
     except Exception as e:
         print("  Schema check : ⚠️ {}".format(e))
+
+    # 验收锚定状态 (v1.3.3+)
+    if missing_acceptance:
+        print("  Acceptance   : ⚠️ 设计脑补全失败, 缺失: {}".format(
+            ", ".join(missing_acceptance)))
+    else:
+        print("  Acceptance   : OK ({} agents anchored)".format(
+            len(config.get("agents", []))))
 
     # ── ⑤ HumanGate ──
     print("── Pipeline plan ──")
@@ -273,6 +347,14 @@ def run_design(description, auto_confirm=False, expand=True):
             print("Aborted. Config saved; run later with:")
             print("  python3 run.py --config {}".format(cfg_path))
             return 1
+
+    # ── 验收锚定拦截 (v1.3.3+): 不静默降级 ──
+    if missing_acceptance:
+        print()
+        print("⚠️ 验收锚定缺失 ({}): 设计脑补全失败, 拒绝执行。".format(
+            ", ".join(missing_acceptance)))
+        print("   处理方式: 人工补 acceptance_criteria 后重跑; 或重跑 --design 重新生成。")
+        return 1
 
     # ── ⑥ Execution brain ──
     print("Running pipeline...")

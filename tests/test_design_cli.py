@@ -200,12 +200,15 @@ def test_design_raw_schema_normalized_to_engine_schema(monkeypatch, tmp_path):
     必须被校正层归一化为引擎可加载格式 (v1.3.3+)。"""
     _ws_env(monkeypatch, tmp_path)
     live_catalog = ["qwen3.7-plus"]
+    accept_map = {"R1": ["3+ user stories"], "R4": ["endpoint returns 200"]}
     monkeypatch.setattr("src.model_discovery.fetch_model_catalog",
                         lambda base_url, api_key, timeout=10: live_catalog)
     monkeypatch.setattr("src.design_cli.fetch_model_catalog",
                         lambda base_url, api_key, timeout=10: live_catalog)
-    monkeypatch.setattr("src.design_cli.LLMClient",
-                        lambda **kw: _FakeClient([json_mod.dumps(RAW_DESIGN_SCHEMA)]))
+    monkeypatch.setattr(
+        "src.design_cli.LLMClient",
+        lambda **kw: _FakeClient([json_mod.dumps(RAW_DESIGN_SCHEMA),
+                                  json_mod.dumps(accept_map)]))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", lambda prompt="": "n")
     rc = run_design("raw schema", auto_confirm=False, expand=False)
@@ -230,6 +233,61 @@ def test_design_raw_schema_normalized_to_engine_schema(monkeypatch, tmp_path):
     assert "topology_strategy" not in dn and "model_strategy" not in dn
     assert "topology_strategy" in dn.get("why_these_agents", "")
     assert "model_strategy" in dn.get("why_these_agents", "")
+    # 验收锚定缺口 → 设计脑补全回环
+    assert saved["agents"][0]["acceptance_criteria"] == ["3+ user stories"]
+    assert saved["agents"][1]["acceptance_criteria"] == ["endpoint returns 200"]
     # 引擎 load_config 可直接加载 (无校验错误)
     from src.config_loader import load_config
     load_config(str(tmp_path / "output/raw_schema_design/design_config.json"))
+
+
+def test_acceptance_missing_blocks_execution(monkeypatch, tmp_path, capsys):
+    """验收锚定缺失且设计脑补全失败 → 拒绝执行 (即使 --yes), 不静默降级 (v1.3.3+)。"""
+    _ws_env(monkeypatch, tmp_path)
+    live_catalog = ["qwen3.7-plus"]
+    monkeypatch.setattr("src.model_discovery.fetch_model_catalog",
+                        lambda base_url, api_key, timeout=10: live_catalog)
+    monkeypatch.setattr("src.design_cli.fetch_model_catalog",
+                        lambda base_url, api_key, timeout=10: live_catalog)
+    # 第二次 LLM 调用 (补全回环) 返回非法 JSON → 补全失败
+    monkeypatch.setattr(
+        "src.design_cli.LLMClient",
+        lambda **kw: _FakeClient([json_mod.dumps(RAW_DESIGN_SCHEMA), "not json"]))
+    monkeypatch.chdir(tmp_path)
+    rc = run_design("raw schema", auto_confirm=True, expand=False)
+    out = capsys.readouterr().out
+    assert rc == 1  # 拦截: 拒绝执行
+    assert "验收锚定缺失" in out
+    assert "R1" in out and "R4" in out  # 缺失角色被点名
+
+
+def test_design_prompt_mandates_acceptance_criteria():
+    """设计脑 prompt 必须在输出格式示例中展示 acceptance_criteria,
+    且规则8 强制每个 agent 带 2-5 条 (v1.3.3+)。"""
+    from src.orchestrator_agent import ORCHESTRATOR_SYSTEM
+    assert '"acceptance_criteria"' in ORCHESTRATOR_SYSTEM
+    assert "MUST include 2-5 acceptance_criteria" in ORCHESTRATOR_SYSTEM
+
+
+def test_acceptance_fill_prompt_carries_project_context():
+    """补全回环提示词必须携带项目描述 + agent role_goal —
+    回归: 缺失时设计脑会跑偏到别的项目域 (2026-08-14 活体实测)。"""
+    from src.design_cli import _fill_missing_acceptance
+    config = {"agents": [
+        {"role": "R4", "name": "后端开发",
+         "role_goal": "Implement FastAPI CRUD for Todo API",
+         "output_file": "app.py"},
+    ]}
+    seen = []
+
+    def spy_call_llm(prompt, user_prompt=""):
+        seen.append(prompt)
+        return '{"R4": ["health endpoint returns 200"]}'
+
+    cfg, missing = _fill_missing_acceptance(
+        config, spy_call_llm, description="Build a Todo API backend")
+    assert missing == []
+    prompt = seen[0]
+    assert "Build a Todo API backend" in prompt  # 项目描述
+    assert "FastAPI CRUD" in prompt              # agent role_goal
+    assert cfg["agents"][0]["acceptance_criteria"] == ["health endpoint returns 200"]
