@@ -956,11 +956,11 @@ def test_bailian_config_loads():
     result = load_config(ref_path)
     assert "providers" in result
     assert result["providers"]["litellm"]["base_url"]
-    assert result["models"]["registry"]["qwen-coder-plus"]["model"]
+    assert result["models"]["registry"]["qwen3.8-max"]["model"]
     # Check per-agent model assignments
     models = {a["role"]: a.get("model", "") for a in result["agents"]}
-    assert models.get("R1") == "qwen-turbo"      # cheap for requirements
-    assert models.get("R4") == "qwen-coder-plus"  # powerful for code
+    assert models.get("R1") == "qwen3.6-flash"   # cheap for requirements
+    assert models.get("R4") == "qwen3.7-max"     # powerful for code
 
 def test_orchestrator_multi_model_template():
     """Template configs should support per-agent model field."""

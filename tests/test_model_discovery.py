@@ -185,3 +185,65 @@ def test_fetch_401_surfaces_provider_error_body(monkeypatch):
         fetch_model_catalog("https://example.com/v1", "wrong-key")
     assert exc.value.status == 401
     assert "API key is invalid" in str(exc.value)
+
+
+def test_cheap_tier_prefers_known_family_over_unknown():
+    # glm-5.2 has no tier keyword (score ~0) — low score must not mean cheap
+    catalog = ["glm-5.2", "qwen3.6-flash"]
+    assert pick_model(catalog, "cheap") == "qwen3.6-flash"
+
+
+def test_workspace_respects_base_url_env_override(monkeypatch):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-local")
+    monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://token-plan.example.com/compatible-mode/v1")
+    monkeypatch.setenv("AGENTGATE_WORKSPACE", "/tmp/nonexistent_ws.json")
+    captured = {}
+
+    def fake_fetch(base_url, api_key, timeout=10):
+        captured["base_url"] = base_url
+        return ["qwen3.8-max"]
+
+    monkeypatch.setattr("src.model_discovery.fetch_model_catalog", fake_fetch)
+    from src.workspace import detect_workspace
+    cfg = detect_workspace()
+    assert cfg.brain_base_url == "https://token-plan.example.com/compatible-mode/v1"
+    assert captured["base_url"] == cfg.brain_base_url
+
+
+def test_check_models_401_hint(monkeypatch, capsys):
+    import src.model_discovery
+    import run as run_mod
+
+    def fake_fetch(base_url, api_key, timeout=10):
+        raise src.model_discovery.ModelDiscoveryError("HTTP 401", status=401)
+
+    monkeypatch.setattr("src.model_discovery.fetch_model_catalog", fake_fetch)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-fake")
+    rc = run_mod.run_check_models(config_path=None)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "DASHSCOPE_BASE_URL" in out  # actionable hint shown
+
+
+def test_check_models_validates_resolved_names_not_aliases(monkeypatch, capsys, tmp_path):
+    import json as json_mod
+    import run as run_mod
+
+    cfg = {
+        "project": {"name": "t", "description": "t"},
+        "providers": {"relay": {"base_url": "http://x/v1", "api_key": "${RELAY_KEY}"}},
+        "models": {"default": "real-flash-0731", "registry": {
+            "cheap-alias": {"provider": "relay", "model": "real-flash-0731"},
+        }},
+        "agents": [{"role": "R1", "name": "T", "role_goal": "t", "output_file": "o.md"}],
+    }
+    cfg_file = tmp_path / "cfg.json"
+    cfg_file.write_text(json_mod.dumps(cfg))
+    monkeypatch.setenv("RELAY_KEY", "sk-x")
+    monkeypatch.setattr(
+        "src.model_discovery.fetch_model_catalog",
+        lambda base_url, api_key, timeout=10: ["real-flash-0731", "real-pro"])
+    rc = run_mod.run_check_models(config_path=str(cfg_file))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "alive" in out  # alias is local-only, resolved name is what matters

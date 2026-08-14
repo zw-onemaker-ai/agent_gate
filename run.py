@@ -94,7 +94,9 @@ def run_check_models(config_path=None):
             print("  export ARK_API_KEY=\"...\"            # Volcano")
             return 1
         provider_name = "bailian"
-        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        base_url = os.environ.get(
+            "DASHSCOPE_BASE_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1")
         api_key = key
 
     print("Model Catalog Check")
@@ -104,6 +106,11 @@ def run_check_models(config_path=None):
         catalog = fetch_model_catalog(base_url, api_key)
     except ModelDiscoveryError as e:
         print("  ❌ {}".format(e.message))
+        if e.status == 401:
+            print("  💡 Key 被端点拒绝。若你的 key 来自百炼控制台的「按量付费计划」，")
+            print("     该 key 只认计划专属域名（token-plan.cn-beijing.maas.aliyuncs.com）。")
+            print("     解决: export DASHSCOPE_BASE_URL=\"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1\"")
+            print("     或用 --config 指向 providers.base_url 为该域名的配置。")
         return 1
 
     chat_catalog = [m for m in catalog]
@@ -112,13 +119,24 @@ def run_check_models(config_path=None):
         print("    - {}".format(m))
 
     if registry_names:
-        result = check_registry(catalog, registry_names)
+        # 比对「解析后的模型名」(registry alias → model 字段)，
+        # 本地别名只用于展示——API 实际发送的是 model 值。
+        resolved_names = []
+        name_by_resolved = {}
+        for alias in registry_names:
+            entry = registry[alias]
+            real = entry.get("model", alias) if isinstance(entry, dict) else alias
+            resolved_names.append(real)
+            name_by_resolved[real] = alias
+        result = check_registry(catalog, resolved_names)
         if result["missing"]:
             print("  Registry check:")
             for name in result["missing"]:
+                alias = name_by_resolved.get(name, name)
                 hint = result["suggestions"].get(name)
                 suffix = " (suggest: {})".format(hint) if hint else ""
-                print("    - {} → ❌ NOT in live catalog{}".format(name, suffix))
+                label = alias if alias != name else name
+                print("    - {} → ❌ NOT in live catalog{}".format(label, suffix))
         else:
             print("  Registry check: all {} names alive ✓".format(len(registry_names)))
 

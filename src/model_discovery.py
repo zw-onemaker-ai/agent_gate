@@ -156,7 +156,11 @@ def pick_model(catalog, tier="balanced", fallback=None):
         best = sorted(scored, key=lambda x: -x[1])
         return best[0][0]
     if tier == "cheap":
-        cheapest = sorted(scored, key=lambda x: x[1])
+        # 只信任已知档位关键词的模型当"便宜"，陌生家族(如 glm-5.2)
+        # 分数低不代表便宜——降级到已知族最低档，没有则退回全部候选。
+        known = [s for s in scored if s[1] >= 1.0]
+        pool = known or scored
+        cheapest = sorted(pool, key=lambda x: x[1])
         return cheapest[0][0]
     # balanced: prefer mid-tier (rank 2); degrade gracefully
     mid = [s for s in scored if 1.5 <= s[1] < 3.0]

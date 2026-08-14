@@ -50,7 +50,9 @@ def detect_workspace():
     if os.environ.get("DASHSCOPE_API_KEY"):
         config.brain_provider = "litellm"
         config.brain_model = "qwen3.7-plus"
-        config.brain_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        config.brain_base_url = os.environ.get(
+            "DASHSCOPE_BASE_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1")
         config.brain_api_key = os.environ["DASHSCOPE_API_KEY"]
     # 2. OpenAI
     elif os.environ.get("OPENAI_API_KEY"):
