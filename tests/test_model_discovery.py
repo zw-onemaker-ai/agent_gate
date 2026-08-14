@@ -170,3 +170,18 @@ def test_workspace_falls_back_when_probe_fails(monkeypatch, tmp_path):
     cfg = detect_workspace()
     assert cfg.brain_model == "qwen3.7-plus"  # offline fallback
     assert cfg.available_models == []
+
+
+def test_fetch_401_surfaces_provider_error_body(monkeypatch):
+    import io
+
+    def fake_open(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 401, "Unauthorized", {},
+            io.BytesIO(b'{"code":"InvalidApiKey","message":"API key is invalid"}'))
+
+    monkeypatch.setattr("src.model_discovery.urllib.request.urlopen", fake_open)
+    with pytest.raises(ModelDiscoveryError) as exc:
+        fetch_model_catalog("https://example.com/v1", "wrong-key")
+    assert exc.value.status == 401
+    assert "API key is invalid" in str(exc.value)

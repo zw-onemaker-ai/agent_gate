@@ -89,9 +89,23 @@ def fetch_model_catalog(base_url, api_key, timeout=10):
             status = getattr(resp, "status", 200) or 200
             body = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+            try:
+                j = json_mod.loads(body)
+                msg = j.get("message")
+                if not msg and isinstance(j.get("error"), dict):
+                    msg = j["error"].get("message")
+                detail = str(msg) if msg else body[:200]
+            except ValueError:
+                detail = body[:200]
+        except Exception:
+            pass
+        suffix = " Provider says: {}".format(detail) if detail else             " Check base_url and api_key."
         raise ModelDiscoveryError(
-            "GET {} → HTTP {} ({}). Check base_url and api_key.".format(
-                url, e.code, e.reason), status=e.code)
+            "GET {} → HTTP {} ({}).{}".format(
+                url, e.code, e.reason, suffix), status=e.code)
     except urllib.error.URLError as e:
         raise ModelDiscoveryError(
             "GET {} → network error: {}".format(url, e.reason))
