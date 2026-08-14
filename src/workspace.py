@@ -26,6 +26,9 @@ class WorkspaceConfig:
     # 执行Agent可用的平台
     available_platforms: List[str] = field(default_factory=list)  # ["bailian","ollama","deepseek"]
 
+    # 运行时探测到的模型清单 (L0 discovery, v1.3)
+    available_models: List[str] = field(default_factory=list)
+
     # 偏好
     preference: str = "balanced"          # "cheap" | "balanced" | "quality"
     language: str = "zh"                  # "zh" | "en" — 影响模型选择
@@ -46,7 +49,7 @@ def detect_workspace():
     # 1. 百炼
     if os.environ.get("DASHSCOPE_API_KEY"):
         config.brain_provider = "litellm"
-        config.brain_model = "qwen-plus"
+        config.brain_model = "qwen3.7-plus"
         config.brain_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         config.brain_api_key = os.environ["DASHSCOPE_API_KEY"]
     # 2. OpenAI
@@ -83,6 +86,7 @@ def detect_workspace():
 
     # ── 尝试加载 workspace.json (覆盖) ──
     ws_file = os.environ.get("AGENTGATE_WORKSPACE", "workspace.json")
+    model_overridden = False
     if os.path.exists(ws_file):
         try:
             with open(ws_file) as f:
@@ -92,6 +96,7 @@ def detect_workspace():
                 config.brain_provider = brain["provider"]
             if brain.get("model"):
                 config.brain_model = brain["model"]
+                model_overridden = True
             if brain.get("base_url"):
                 config.brain_base_url = brain["base_url"]
             if brain.get("api_key"):
@@ -108,7 +113,41 @@ def detect_workspace():
         except Exception:
             pass
 
+    # ── L0 运行时探测 (v1.3) ──
+    # 显式指定模型时跳过；无 key / 无云端地址时跳过（本地 Ollama 无需探测）
+    if not model_overridden and config.brain_api_key and config.brain_base_url:
+        _discover_brain_model(config)
+
     return config
+
+
+def _discover_brain_model(config):
+    # type: (WorkspaceConfig) -> None
+    """用运行时探测到的真实模型清单挑选设计脑模型。
+
+    失败时静默降级到离线默认值——探测是增强，不是阻塞。
+    """
+    from .model_discovery import (
+        ModelDiscoveryError, fetch_model_catalog, pick_model)
+
+    tier = {
+        "quality": "strong",
+        "cheap": "cheap",
+        "balanced": "balanced",
+    }.get(config.preference, "balanced")
+
+    try:
+        catalog = fetch_model_catalog(
+            config.brain_base_url, config.brain_api_key)
+    except ModelDiscoveryError:
+        return
+
+    if not catalog:
+        return
+    config.available_models = catalog
+    picked = pick_model(catalog, tier)
+    if picked:
+        config.brain_model = picked
 
 
 def show_workspace(config=None):
@@ -132,9 +171,14 @@ def show_workspace(config=None):
         "   {} → {} {}".format(
             config.brain_provider, config.brain_model,
             "(云端)" if config.brain_api_key else "(本地)"),
+    ]
+    if config.available_models:
+        lines.append("   在线模型清单: {} 个 (运行时探测)".format(
+            len(config.available_models)))
+    lines.extend([
         "",
         "📡 可用平台 ({}个):".format(len(config.available_platforms)),
-    ]
+    ])
     for p in config.available_platforms:
         name = platform_names.get(p, p)
         has_key = bool(os.environ.get(

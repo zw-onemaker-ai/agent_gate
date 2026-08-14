@@ -117,3 +117,56 @@ def test_check_registry_all_alive():
     catalog = ["qwen3.7-flash", "qwen3.7-plus"]
     result = check_registry(catalog, ["qwen3.7-flash"])
     assert result == {"missing": [], "suggestions": {}}
+
+
+# ── Workspace integration (design brain bootstrap) ──────────────────────
+
+def _write_ws(tmp_path, design_brain):
+    import json as json_mod
+    ws_file = tmp_path / "workspace.json"
+    ws_file.write_text(json_mod.dumps(
+        {"design_brain": design_brain, "preference": "quality"}))
+    return str(ws_file)
+
+
+def test_workspace_discovers_brain_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-local")
+    monkeypatch.setenv("AGENTGATE_WORKSPACE", _write_ws(
+        tmp_path, {"provider": "litellm",
+                   "base_url": "http://127.0.0.1:18765/v1"}))
+    monkeypatch.setattr(
+        "src.model_discovery.fetch_model_catalog",
+        lambda base_url, api_key, timeout=10: ["qwen3.7-flash", "qwen3.8-max"])
+    from src.workspace import detect_workspace
+    cfg = detect_workspace()
+    assert cfg.brain_model == "qwen3.8-max"  # quality preference → strong
+    assert cfg.available_models == ["qwen3.7-flash", "qwen3.8-max"]
+
+
+def test_workspace_explicit_model_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-local")
+    monkeypatch.setenv("AGENTGATE_WORKSPACE", _write_ws(
+        tmp_path, {"provider": "litellm", "model": "my-custom-model",
+                   "base_url": "http://127.0.0.1:18765/v1"}))
+    monkeypatch.setattr(
+        "src.model_discovery.fetch_model_catalog",
+        lambda base_url, api_key, timeout=10: ["qwen3.8-max"])
+    from src.workspace import detect_workspace
+    cfg = detect_workspace()
+    assert cfg.brain_model == "my-custom-model"
+
+
+def test_workspace_falls_back_when_probe_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-local")
+    monkeypatch.setenv("AGENTGATE_WORKSPACE", _write_ws(
+        tmp_path, {"provider": "litellm",
+                   "base_url": "http://127.0.0.1:19999/v1"}))
+    import src.model_discovery
+
+    def boom(base_url, api_key, timeout=10):
+        raise src.model_discovery.ModelDiscoveryError("down")
+    monkeypatch.setattr("src.model_discovery.fetch_model_catalog", boom)
+    from src.workspace import detect_workspace
+    cfg = detect_workspace()
+    assert cfg.brain_model == "qwen3.7-plus"  # offline fallback
+    assert cfg.available_models == []
