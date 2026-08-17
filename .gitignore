@@ -5,3 +5,4 @@ output/
 dist/
 .env
 memory/
+logs/
