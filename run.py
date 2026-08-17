@@ -213,8 +213,10 @@ def main():
     config["_path"] = str(config_path)
 
     proj = config.get("project", {})
+    meta_cfg = config.get("meta", {})
+    description = proj.get("description") or meta_cfg.get("description") or "N/A"
     print("Pipeline: {}".format(proj.get("name", config_path.stem)))
-    print("Description: {}".format(proj.get("description", "N/A")))
+    print("Description: {}".format(description))
     print("Agents: {}".format(len(config.get("agents", []))))
     print("Model: {} / {}".format(args.provider, args.model))
     print()
@@ -245,7 +247,8 @@ def main():
         return
 
     # Run pipeline
-    idea = args.idea or proj.get("description", "")
+    # v1.3.4 ④: meta.description fallback for design-brain configs
+    idea = args.idea or proj.get("description", "") or meta_cfg.get("description", "")
     state = gate.run_pipeline(initial_context=idea, stages=stages)
     print("\n" + gate.summary())
 

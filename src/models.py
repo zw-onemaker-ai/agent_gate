@@ -120,3 +120,4 @@ class PipelineState:
     current_role: str = "R1"
     max_iterations: int = 5
     design_notes: Optional[DesignNotes] = None  # 🆕 Q2
+    project_description: str = ""  # 🆕 v1.3.4: meta.description fallback

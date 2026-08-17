@@ -210,6 +210,13 @@ def build_pipeline(config, provider="ollama", model="qwen2.5:7b", output_dir=Non
         model_provider=provider,
         model_name=model,
     )
+    # v1.3.4 ④: wire meta.description into the gate so run_pipeline can fall
+    # back to it when no idea argument is passed (design brain configs store
+    # the description in meta, not project)
+    gate.project_description = (
+        (meta.get("description") or "").strip()
+        or (project.get("description") or "").strip()
+    )
     # Inject provider config into gate's LLM client
     if gate_base_url:
         gate.llm.base_url = gate_base_url
