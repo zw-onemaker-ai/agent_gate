@@ -285,3 +285,11 @@ def test_engine_cpoo_chain_converges(tmp_path, monkeypatch):
     assert final_score >= 80, "chained pattern fix must converge (got {})".format(final_score)
     assert "## IO Format" in gate._agents["R1"]["prompt_template"]
     assert out.quality_gate == GateStatus.PASS
+
+
+def test_sanitize_rejects_tool_call_stub():
+    # Live E2E: the model emitted a 48-byte "<tool_call>" stub as its
+    # artifact — the gate caught it via criteria, but sanitization should
+    # treat it as empty so the engine retries with a clear reason
+    stub = "<tool_call>\n{'name': 'write_file'}\n</tool_call>"
+    assert sanitize_agent_output(stub, "architecture.md") == ""

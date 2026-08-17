@@ -331,7 +331,13 @@ def sanitize_agent_output(raw, output_file):
             inner = inner.rstrip()[:-3]
         text = inner.strip()
 
-    # 2. Remove Part B contract block
+    # 2. Tool-call stubs are not artifacts (live E2E: qwen emitted a 48-byte
+    # "<tool_call>..." stub as its architecture.md) — treat as empty so the
+    # engine retries the agent instead of writing a useless file
+    if text.lstrip().startswith("<tool_call"):
+        return ""
+
+    # 3. Remove Part B contract block
     text = re.sub(r"CONTRACT_START.*?CONTRACT_END", "", text, flags=re.S)
 
     # 3. Remove Part A / Part B section headers
