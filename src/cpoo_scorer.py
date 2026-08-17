@@ -174,6 +174,21 @@ class CPOOScorer:
         # Pattern-based fix: append missing sections
         return self._pattern_fix(prompt_text, result)
 
+    def pattern_fix(self, prompt_text, result=None):
+        # type: (str, Optional[CPOOResult]) -> str
+        """v1.3.4 ⑤: public offline fix — appends missing module content.
+
+        Entry point for the 60-80 score band (below threshold but above the
+        LLM-regen floor): cheap, no LLM cost, converges the stuck score.
+        Templates are written to match the module patterns, so a re-score
+        after the fix actually improves.
+        """
+        if result is None:
+            result = self.score(prompt_text)
+        if result.passed:
+            return prompt_text  # Already good
+        return self._pattern_fix(prompt_text, result)
+
     def _build_summary(self, modules, total):
         # type: (list, int) -> str
         parts = []
@@ -189,19 +204,30 @@ class CPOOScorer:
 
     def _pattern_fix(self, prompt_text, result):
         # type: (str, CPOOResult) -> str
-        """Best-effort fix: append missing module content."""
+        """Best-effort fix: append missing module content.
+
+        v1.3.4 ⑤: fixed two defects — (a) threshold was <12/20, so half-missing
+        modules were never fixed; (b) the appended templates did not match the
+        scoring patterns themselves (the IO fix scored 0 points), so re-scoring
+        after a fix could not converge. Templates now hit every pattern.
+        """
         missing = []
         for m in result.modules:
-            if m.score < 12:  # Below 60% for this module
+            if m.score < 20:  # any missing element gets fixed
                 missing.append(m.name)
 
         fixes = []
         if "Role" in missing:
-            fixes.append("## Role\nYou are a capable agent. Your task is clearly defined above.")
+            fixes.append(
+                "## Role\n"
+                "You are an expert engineer for this task.\n"
+                "Your role is to complete the deliverable defined above.\n"
+                "Your goal: produce complete, working output with no placeholders."
+            )
         if "Constraints" in missing:
             fixes.append(
                 "## Constraints\n"
-                "- 🔴 MUST: Produce complete output with no placeholders\n"
+                "- 🔴 MUST: Produce complete output with no placeholders or TODOs\n"
                 "- 🔴 MUST: All Bash verification output must carry EXIT_CODE fingerprint\n"
                 "- 🟡 SHOULD: Follow best practices for the given scenario"
             )
@@ -216,8 +242,9 @@ class CPOOScorer:
         if "IO Format" in missing:
             fixes.append(
                 "## IO Format\n"
-                "**Input:** Upstream agent context\n"
-                "**Output:** Write to specified output file"
+                "**Input format:** Upstream agent context and requirements.\n"
+                "**Output format:** The complete deliverable written to the output file.\n"
+                "**Output file path:** as specified in your instructions."
             )
         if "Quality" in missing:
             fixes.append(
@@ -225,7 +252,9 @@ class CPOOScorer:
                 "Your output will be automatically verified for:\n"
                 "- File existence and non-emptiness\n"
                 "- EXIT_CODE fingerprint in all bash output\n"
-                "- Compliance with acceptance criteria"
+                "- Acceptance criteria compliance\n"
+                "- Completeness: no TODO or placeholder — output must be complete\n"
+                "- Self-check your work before declaring done"
             )
 
         return prompt_text + "\n\n" + "\n\n".join(fixes)

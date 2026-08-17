@@ -21,7 +21,10 @@ from .models import (
     AgentOutput, ContextPackage, Contract, GateStatus, LoopbackTarget,
     PipelineState, QualityGateResult,
 )
-from .validators import quality_gate_check, run_bash, cross_verify_contract
+from .validators import (
+    quality_gate_check, run_bash, cross_verify_contract,
+    sanitize_agent_output, sanitize_loopback_context, strengthen_verify_cmd,
+)
 from .llm_client import LLMClient, LLMResponse
 from .context_assembler import ContextAssembler, parse_contract_from_output
 from .tool_registry import ToolRegistry, get_registry
@@ -42,6 +45,9 @@ class AgentGate:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.model_provider = model_provider
         self.model_name = model_name
+        # v1.3.4 ④: config meta.description — fallback initial_context for
+        # --config reruns (design brain configs store description in meta)
+        self.project_description = ""
         self._agents = {}  # type: Dict[str, dict]
         self._gate_history = []  # type: List[QualityGateResult]
         self._lock = threading.Lock()
@@ -179,24 +185,38 @@ class AgentGate:
             if not cpoo_result.passed:
                 print("  [CPOO] Prompt score {}/100 — below threshold (80)".format(
                     cpoo_result.total))
-                if cpoo_result.needs_regen:
-                    print("  [CPOO] Score < 60 — attempting auto-optimization...")
+                # v1.3.4 ⑤: the 60-80 band was a dead zone — nothing was ever
+                # attempted there, so scores stayed stuck at 66/67 for 3 rounds.
+                use_llm = (cpoo_result.needs_regen
+                           and self.cpoo_scorer.call_llm_fn is not None)
+                if use_llm:
+                    print("  [CPOO] Score < 60 — attempting LLM rewrite...")
                     optimized = self.cpoo_scorer.optimize(
                         agent["prompt_template"],
                         role_goal=agent.get("role_goal", ""),
                         acceptance_criteria=agent.get("acceptance_criteria", []),
                     )
+                else:
+                    print("  [CPOO] Applying offline pattern fix...")
+                    optimized = self.cpoo_scorer.pattern_fix(
+                        agent["prompt_template"])
+                if optimized and optimized != agent["prompt_template"]:
                     agent["prompt_template"] = optimized
-                    print("  [CPOO] Optimized prompt ({} chars)".format(len(optimized)))
-                self._cpoo_warnings.append(
-                    "{}: {}/100 — {}".format(
-                        role, cpoo_result.total,
-                        "; ".join(
-                            "{} ({}/20)".format(m.name, m.score)
-                            for m in cpoo_result.modules if m.score < 15
+                    rescored = self.cpoo_scorer.score(optimized)
+                    print("  [CPOO] {}: {}/100 → {}/100".format(
+                        "LLM rewrite" if use_llm else "pattern fix",
+                        cpoo_result.total, rescored.total))
+                    cpoo_result = rescored
+                if not cpoo_result.passed:
+                    self._cpoo_warnings.append(
+                        "{}: {}/100 — {}".format(
+                            role, cpoo_result.total,
+                            "; ".join(
+                                "{} ({}/20)".format(m.name, m.score)
+                                for m in cpoo_result.modules if m.score < 15
+                            )
                         )
                     )
-                )
             else:
                 print("  [CPOO] Prompt score {}/100 — OK".format(cpoo_result.total))
 
@@ -231,9 +251,12 @@ class AgentGate:
         output_file = agent.get("output_file", "")
         part_a_files = []
         if output_file and not llm_error:
+            # v1.3.4 ①: sanitize BEFORE writing — raw narrative/fences at the
+            # top of code files broke py_compile in the E2E first run
+            clean_output = sanitize_agent_output(raw_output, output_file)
             full_path = self.output_dir / output_file
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(raw_output, encoding="utf-8")
+            full_path.write_text(clean_output, encoding="utf-8")
             part_a_files = [str(full_path)]
 
         verify_cmd = agent.get("verify_cmd", "")
@@ -254,6 +277,11 @@ class AgentGate:
             # Cache it back so downstream can see it
             agent["verify_cmd"] = verify_cmd
 
+        # v1.3.4 ②: code artifacts must carry a real syntax check — a gate
+        # must never pass a code file on a grep-only command
+        if verify_cmd and part_a_files:
+            verify_cmd = strengthen_verify_cmd(verify_cmd, part_a_files[0])
+
         verify_output = ""
         if verify_cmd:
             verify_output, _ = run_bash(verify_cmd)
@@ -273,6 +301,19 @@ class AgentGate:
             ]
             gate_result.fail_reasons.append("LLM call failed: {}".format(llm_error))
             gate_result.loopback_target = LoopbackTarget.SELF
+        elif output_file and part_a_files:
+            # v1.3.4 ①: sanitization wiped everything — explicit retry signal
+            # instead of an unclassifiable empty-file failure
+            try:
+                written = Path(part_a_files[0]).stat().st_size
+            except OSError:
+                written = 0
+            if written == 0:
+                gate_result.status = GateStatus.FAIL
+                gate_result.fail_reasons.append(
+                    "Sanitized output empty — nothing usable after "
+                    "stripping narrative/fences")
+                gate_result.loopback_target = LoopbackTarget.SELF
         with self._lock:
             self._gate_history.append(gate_result)
 
@@ -331,6 +372,10 @@ class AgentGate:
         their outputs are merged before passing to the next stage.
         """
         context = initial_context
+        # v1.3.4 ④: config meta.description fallback — --config reruns without
+        # an idea argument previously started with an empty context
+        if not context or not context.strip():
+            context = getattr(self, "project_description", "")
         roles = list(self._agents.keys())
 
         # Build pipeline plan
@@ -402,10 +447,13 @@ class AgentGate:
                     # Retry the same stage — transient infra failures (LLM call errors)
                     print("\n[LOOPBACK] {} → retry same stage (transient failure)".format(
                         "+".join(stage_roles)))
-                    context = "[LOOPBACK] RETRY: {}\n[CONTEXT] Upstream: {}".format(
-                        ", ".join(self._gate_history[-1].fail_reasons),
-                        " | ".join(c.summary for c in self._upstream_contracts if c.summary) or "(none)",
-                    )
+                    # v1.3.4 ③: sanitized — never leak verify-command traces
+                    # into the retry prompt (they get hallucinated back)
+                    context = sanitize_loopback_context(
+                        "[LOOPBACK] RETRY: {}\n[CONTEXT] Upstream: {}".format(
+                            ", ".join(self._gate_history[-1].fail_reasons),
+                            " | ".join(c.summary for c in self._upstream_contracts if c.summary) or "(none)",
+                        ))
                     continue
 
                 print("\n[LOOPBACK] {} → {} (reason: {})".format(
@@ -432,19 +480,22 @@ class AgentGate:
                     # current stage with failure context instead.
                     print("[LOOPBACK] target {} not in plan — retrying current stage".format(
                         target.value))
-                    context = "[LOOPBACK] RETRY: {}\n[CONTEXT] Upstream: {}".format(
-                        ", ".join(self._gate_history[-1].fail_reasons),
-                        " | ".join(c.summary for c in self._upstream_contracts if c.summary) or "(none)",
-                    )
+                    context = sanitize_loopback_context(
+                        "[LOOPBACK] RETRY: {}\n[CONTEXT] Upstream: {}".format(
+                            ", ".join(self._gate_history[-1].fail_reasons),
+                            " | ".join(c.summary for c in self._upstream_contracts if c.summary) or "(none)",
+                        ))
                     continue
 
                 # Phase 2: pass both failure context AND surviving upstream context
                 upstream_summary = " | ".join(
                     c.summary for c in self._upstream_contracts if c.summary)
-                context = "[LOOPBACK] FAIL: {}\n[CONTEXT] Upstream: {}".format(
-                    ", ".join(self._gate_history[-1].fail_reasons),
-                    upstream_summary or "(none)",
-                )
+                # v1.3.4 ③: sanitized — failure context must be human-readable
+                context = sanitize_loopback_context(
+                    "[LOOPBACK] FAIL: {}\n[CONTEXT] Upstream: {}".format(
+                        ", ".join(self._gate_history[-1].fail_reasons),
+                        upstream_summary or "(none)",
+                    ))
                 continue
 
             # All passed — advance to next stage

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Tuple
@@ -30,11 +31,15 @@ def bash_verify_files(file_paths, check_syntax=True):
                 pass
             if check_syntax and p.suffix == ".py":
                 try:
-                    subprocess.run(["python3", "-m", "py_compile", str(p)],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-                    info["syntax_ok"] = True
+                    r = subprocess.run(["python3", "-m", "py_compile", str(p)],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                    # v1.3.4 fix: returncode was ignored — a failing py_compile
+                    # was recorded as syntax_ok=True (E2E root cause amplifier)
+                    info["syntax_ok"] = (r.returncode == 0)
                 except Exception:
                     info["syntax_ok"] = False
+                if info["syntax_ok"] is False:
+                    result["status"] = GateStatus.FAIL
         result["files"][fp] = info
         if not info["exists"] or not info["non_empty"]:
             result["status"] = GateStatus.FAIL
@@ -71,8 +76,21 @@ def quality_gate_check(role, part_a_files, verification_output, check_desensitiz
 
     fc = bash_verify_files(part_a_files)
     checks.append({"name": "file_existence", "status": fc["status"].value, "detail": fc["files"]})
-    if fc["status"] == GateStatus.FAIL:
-        fail_reasons.append("Part A files missing or empty")
+    missing = [
+        fp for fp, info in fc["files"].items()
+        if not info["exists"] or not info["non_empty"]
+    ]
+    if missing:
+        fail_reasons.append(
+            "Part A files missing or empty: {}".format(", ".join(missing)))
+    # v1.3.4 ①: syntax failures must fail the gate (previously silent)
+    syntax_bad = [
+        fp for fp, info in fc["files"].items()
+        if info.get("syntax_ok") is False
+    ]
+    if syntax_bad:
+        fail_reasons.append(
+            "Python syntax error in {}".format(", ".join(syntax_bad)))
 
     checks.append({
         "name": "exit_fingerprint",
@@ -103,7 +121,10 @@ def quality_gate_check(role, part_a_files, verification_output, check_desensitiz
 
     # If NONE but gate failed, escalate to human
     if loopback == LoopbackTarget.NONE and status == GateStatus.FAIL:
-        combined = " ".join(fail_reasons) + " " + verification_output
+        # v1.3.4 ③: never embed raw verification output (contains the verify
+        # command itself) into the failure context the retrying agent will see
+        combined = " ".join(fail_reasons) + " " + sanitize_loopback_context(
+            verification_output, max_len=200)
         fail_reasons.append(
             "[HUMAN_GATE] No automatic loopback target matched. "
             "Error context: {}".format(combined[:200])
@@ -247,3 +268,156 @@ def cross_verify_contract(contract, output_dir, check_endpoints=True):
         fail_reasons=fail_reasons,
         loopback_target=LoopbackTarget.NONE if status == GateStatus.PASS else LoopbackTarget.BACKEND,
     )
+
+
+# ── v1.3.4 ①: Output sanitization ──
+
+_CODE_BLOCK_RE = re.compile(r"```[a-zA-Z0-9_+#.-]*\n(.*?)```", re.S)
+
+_PART_HEADER_RE = re.compile(
+    r"^#{0,6}\s*(part\s*[ab]|part\s*[一二])\s*[:：]?.*$", re.I)
+
+_PY_SIGNAL_RE = re.compile(
+    r"^(import\s+|from\s+[\w.]+\s+import\s+|def\s+|async\s+def\s+|class\s+|"
+    r"if\s+__name__\s*==\s*[\"']__main__[\"']|@[\w.]+|#!|"
+    r"\"\"\"|'''|#\s|[A-Za-z_][A-Za-z0-9_]*\s*=\s*)")
+
+# Artifacts where the fenced code block IS the deliverable (vs .md docs where
+# inner code fences are legitimate content and must not be extracted)
+_CODE_FENCE_EXTRACT = {
+    ".py", ".js", ".ts", ".jsx", ".sh", ".go", ".rs", ".java",
+    ".css", ".html", ".json", ".yaml", ".yml", ".sql", ".sol",
+}
+
+
+def sanitize_agent_output(raw, output_file):
+    # type: (str, str) -> str
+    """v1.3.4 ①: strip narrative / markdown fences / Part labels from raw
+    LLM output before it is written as the artifact file.
+
+    E2E failure mode: narrative text landed at the top of app.py and broke
+    py_compile → pytest cascade → unjust loopback spiral.
+
+    The CONTRACT block (Part B) is intentionally removed from the artifact —
+    the engine parses it from the raw output separately.
+    """
+    text = (raw or "").replace("﻿", "").strip()
+    if not text:
+        return ""
+
+    ext = Path(output_file).suffix.lower()
+
+    # 1. Fence handling
+    if ext in _CODE_FENCE_EXTRACT:
+        # Prefer the longest fenced block — that is the real artifact
+        blocks = _CODE_BLOCK_RE.findall(text)
+        if blocks:
+            text = max(blocks, key=len).strip()
+        elif text.startswith("```"):
+            inner = text.split("\n", 1)[-1]
+            if inner.rstrip().endswith("```"):
+                inner = inner.rstrip()[:-3]
+            text = inner.strip()
+    elif text.startswith("```") and text.rstrip().endswith("```"):
+        # Docs: only strip if the WHOLE text is one outer fence
+        inner = text.split("\n", 1)[-1]
+        if inner.rstrip().endswith("```"):
+            inner = inner.rstrip()[:-3]
+        text = inner.strip()
+
+    # 2. Remove Part B contract block
+    text = re.sub(r"CONTRACT_START.*?CONTRACT_END", "", text, flags=re.S)
+
+    # 3. Remove Part A / Part B section headers
+    lines = [
+        l for l in text.split("\n")
+        if not _PART_HEADER_RE.match(l.strip())
+    ]
+    text = "\n".join(lines).strip()
+
+    # 4. Code files: drop leading narrative before the first code-signal line
+    if ext == ".py":
+        text = _strip_python_narrative(text)
+
+    return text.strip()
+
+
+def _strip_python_narrative(text):
+    # type: (str) -> str
+    """Drop narrative lines that precede the first line that looks like code."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if _PY_SIGNAL_RE.match(line.strip()):
+            return "\n".join(lines[i:])
+    return text
+
+
+# ── v1.3.4 ②: verify_cmd strengthening ──
+
+def strengthen_verify_cmd(verify_cmd, file_path):
+    # type: (str, str) -> str
+    """v1.3.4 ②: code files must carry real syntax validation — a gate must
+    never pass a code artifact on a grep-only command.
+
+    Prepends py_compile / node --check for code artifacts. Commands that
+    already contain a syntax check or a python run are left untouched.
+    """
+    if not verify_cmd or not file_path:
+        return verify_cmd
+    ext = Path(file_path).suffix.lower()
+    cmd = verify_cmd.strip()
+    if ext == ".py":
+        syntax = "python3 -m py_compile {}".format(shlex.quote(str(file_path)))
+        if "py_compile" not in cmd and not re.search(r"\bpython3?\s+\S+\.py", cmd):
+            cmd = syntax + " && " + cmd
+    elif ext in (".js", ".mjs", ".ts", ".jsx"):
+        syntax = "node --check {}".format(shlex.quote(str(file_path)))
+        if "--check" not in cmd:
+            cmd = syntax + " && " + cmd
+    return cmd
+
+
+# ── v1.3.4 ③: Loopback context sanitization ──
+
+# Commands are lowercase by convention; case-sensitive so human-readable
+# reasons like "Python syntax error in ..." survive.
+_COMMAND_LINE_RE = re.compile(
+    r"^(python3?|pytest|curl|grep|bash\b|npm|node|pip3?|echo|wc\s|ls\s|"
+    r"test\s|cat\s|find\s|cd\s|mkdir|cp\s|mv\s|rm\s|chmod|git\s|export\s)")
+
+_TRACEBACK_FILE_RE = re.compile(r"^File \"[^\"]+\", line \d+")
+
+
+def sanitize_loopback_context(text, max_len=600):
+    # type: (str, int) -> str
+    """v1.3.4 ③: strip verification-command traces from loopback context.
+
+    E2E failure mode: the failure context carried the verify command text, and
+    the retrying model copied those commands into its output (test_app.py
+    "tool hallucination"). Only human-readable failure reasons and contract
+    summaries should survive into the retry prompt.
+    """
+    if not text:
+        return text
+    cleaned = []
+    for line in text.split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith(("$", ">", ">>>")):
+            continue
+        if s.startswith("Traceback"):
+            continue
+        if _TRACEBACK_FILE_RE.match(s):
+            continue
+        if _COMMAND_LINE_RE.match(s):
+            continue
+        # Drop fingerprint noise but keep the human-readable reason
+        s = re.sub(r"\bEXIT:\d+\b", "", s).replace("()", "").strip()
+        if not s:
+            continue
+        cleaned.append(s)
+    out = "\n".join(cleaned).strip()
+    if len(out) > max_len:
+        out = out[:max_len] + "…"
+    return out
