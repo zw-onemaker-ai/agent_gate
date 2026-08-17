@@ -207,6 +207,18 @@ class AgentGate:
                         "LLM rewrite" if use_llm else "pattern fix",
                         cpoo_result.total, rescored.total))
                     cpoo_result = rescored
+                # v1.3.4 ⑤b: one attempt may not converge (live: 46 → 73) —
+                # chain an offline pattern fix on top; it appends the exact
+                # missing module sections and is idempotent
+                if not cpoo_result.passed:
+                    chained = self.cpoo_scorer.pattern_fix(
+                        agent["prompt_template"])
+                    if chained and chained != agent["prompt_template"]:
+                        agent["prompt_template"] = chained
+                        chained_score = self.cpoo_scorer.score(chained)
+                        print("  [CPOO] pattern fix chain: {}/100 → {}/100".format(
+                            cpoo_result.total, chained_score.total))
+                        cpoo_result = chained_score
                 if not cpoo_result.passed:
                     self._cpoo_warnings.append(
                         "{}: {}/100 — {}".format(
@@ -444,8 +456,9 @@ class AgentGate:
                     )
 
                 if target == LoopbackTarget.SELF:
-                    # Retry the same stage — transient infra failures (LLM call errors)
-                    print("\n[LOOPBACK] {} → retry same stage (transient failure)".format(
+                    # Retry the same stage — transient infra failures (LLM call
+                    # errors) or the artifact failing its own acceptance checks
+                    print("\n[LOOPBACK] {} → retry same stage (transient/content failure)".format(
                         "+".join(stage_roles)))
                     # v1.3.4 ③: sanitized — never leak verify-command traces
                     # into the retry prompt (they get hallucinated back)

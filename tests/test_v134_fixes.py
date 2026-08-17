@@ -230,3 +230,58 @@ def test_engine_sanitizes_output_before_write(tmp_path, monkeypatch):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ── v1.3.4b follow-ups (found during live E2E rerun) ──
+
+def test_generic_verify_failure_routes_self(tmp_path):
+    # Live E2E: architecture.md content failed its grep criteria with no
+    # error pattern → unclassified → interactive HumanGate blocked the run.
+    # A generic verification failure must retry the SAME agent (its own
+    # artifact failed its own acceptance checks).
+    md = tmp_path / "architecture.md"
+    md.write_text("just a stub, no schema")
+    result = quality_gate_check("R3", [str(md)], "EXIT:1")
+    assert result.status == GateStatus.FAIL
+    assert result.loopback_target == LoopbackTarget.SELF
+
+
+def test_verify_syntax_error_still_routes_backend(tmp_path):
+    # Order matters: a syntax error inside the verify output is a code bug,
+    # not a generic content miss.
+    bad = tmp_path / "app.py"
+    bad.write_text("def broken(:\n")
+    verify_out = 'File "app.py", line 3\nSyntaxError: invalid syntax\nEXIT:1'
+    result = quality_gate_check("R4", [str(bad)], verify_out)
+    assert result.status == GateStatus.FAIL
+    assert result.loopback_target == LoopbackTarget.BACKEND
+
+
+def test_engine_cpoo_chain_converges(tmp_path, monkeypatch):
+    # Live E2E: LLM rewrite took 46 → 73 (improved but below 80). The chain
+    # must apply a pattern fix on top until the prompt passes.
+    gate = AgentGate(project_name="t", output_dir=str(tmp_path))
+    gate.register_agent(
+        role="R1", name="req",
+        prompt_template="You are an expert engineer.",  # scores 8/100
+        verify_cmd="echo OK", output_file="r.md")
+
+    # First attempt (LLM rewrite) only reaches 67/100
+    monkeypatch.setattr(
+        gate.cpoo_scorer, "optimize",
+        lambda prompt, role_goal="", acceptance_criteria=None:
+            "You are an expert engineer. Your role: deliver. Your goal: complete.\n"
+            "- 🔴 MUST: complete\n- 🟡 SHOULD: clean\n"
+            "## Workflow\n1. read input\n2. produce output\n"
+            "3. run verification step and record EXIT_CODE\n"
+            "## Quality\nquality gate checked before done")
+    monkeypatch.setattr(
+        gate.llm, "call",
+        lambda system_prompt=None, user_prompt=None: SimpleNamespace(
+            ok=True, content="requirements content", error=None))
+
+    out = gate.run_step("R1", context="todo project")
+    final_score = gate.cpoo_scorer.score(gate._agents["R1"]["prompt_template"]).total
+    assert final_score >= 80, "chained pattern fix must converge (got {})".format(final_score)
+    assert "## IO Format" in gate._agents["R1"]["prompt_template"]
+    assert out.quality_gate == GateStatus.PASS

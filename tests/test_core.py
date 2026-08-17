@@ -114,13 +114,20 @@ def test_oriented_loopback():
 
 
 def test_unclassified_loopback():
-    """Unclassified errors → NONE (escalate to human, not guess R1)."""
+    """Truly unclassifiable errors → NONE (escalate to human, not guess R1).
+
+    v1.3.4b: generic verification failures now route to SELF (retry the same
+    agent) instead of blocking on HumanGate — see
+    test_v134_fixes.test_generic_verify_failure_routes_self. This test covers
+    the remaining escalation path: failures no pattern recognizes
+    (e.g. internal term leaks)."""
     tf = "/tmp/agentgate_unknown.txt"
     with open(tf, "w") as f:
-        f.write("test")
+        f.write("test content with pipeline internal terms")
     result = quality_gate_check(
         "R2", [tf],
-        "Something weird happened but no recognizable pattern\nEXIT:1\n"
+        "EXIT:0\n",
+        check_desensitize=True,
     )
     # Should be NONE (escalate), not REQUIREMENTS (blind guess)
     assert result.loopback_target == LoopbackTarget.NONE, \

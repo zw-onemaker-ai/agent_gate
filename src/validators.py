@@ -181,6 +181,12 @@ LOOPBACK_PATTERNS = [
     (r"(requirement|specification|acceptance\s*criteria|"
      r"user\s*story|scope|missing\s*requirement)",
      LoopbackTarget.REQUIREMENTS),
+    # Generic content-verification failure → SELF: the agent's own artifact
+    # failed its own acceptance checks — regenerate it.
+    # (Specific errors — syntax/traceback/security — match earlier patterns.)
+    (r"(verification\s*(command\s*)?failed|acceptance\s*check\s*failed|"
+     r"criteria\s*not\s*met|check\s*failed)",
+     LoopbackTarget.SELF),
 ]
 
 
