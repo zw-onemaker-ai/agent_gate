@@ -63,6 +63,7 @@ AgentGate **是一个独立的多 Agent 可靠性框架**——跟 LangGraph/Cre
 | 管线诊断 | 无 | 无 | 无 | 无 | 无 | Pipeline Doctor 自动诊断 |
 | 提示词优化 | 无 | 无 | 无 | 无 | 无 | CPOO 五模块自动生成 |
 | 定向回环 | 无 | 无 | 条件分支 | 条件节点 | 无 | 按错误类型精确回环 |
+| 依赖重量 | 重 | 中 | 中 | 平台 | 中 | 零 SDK 依赖（纯标准库） |
 
 > **简单说**：LangChain/CrewAI 把力气花在编排的灵活性。AgentGate 把力气花在调用的可靠性——单步调用无所谓，步数越多越值钱。别人都在造引擎，刹车赛道是空的。
 
@@ -86,9 +87,17 @@ AgentGate **是一个独立的多 Agent 可靠性框架**——跟 LangGraph/Cre
 git clone https://github.com/zw-onemaker-ai/agent_gate.git
 cd agent_gate
 
-# 可选: 安装 LLM 依赖
-pip install litellm  # 使用云端模型
-# 或者什么都不装 → 自动用本地 Ollama
+# 零依赖 — 框架本体只用 Python 标准库（无需安装任何 SDK）
+# 云端模型 → 配一个 API Key 即可（任意 OpenAI 兼容接口：百炼/DeepSeek/OpenAI…）
+# 本地模型 → 什么都不装，直接连 Ollama
+```
+
+### 一句话生成并运行管线（设计脑）
+
+```bash
+# 拆角色、写提示词、定验收标准、配模型 —— 全部自动完成
+python3 run.py --design "做一个会议室预定系统，FastAPI 后端 + React 前端"
+# 生成后先过 HumanGate 人工确认，再自动执行；确认无误可加 --yes 跳过
 ```
 
 ### 零配置试用（纯本地，不花一分钱）
@@ -133,7 +142,7 @@ python3 examples/demo_3role.py --mock
 python3 examples/demo_minimal.py --provider ollama --model qwen2.5:7b
 python3 examples/demo_3role.py --provider ollama --model qwen2.5:7b
 
-# 76 个测试
+# 127 个测试
 python3 -m pytest
 ```
 
@@ -172,7 +181,7 @@ with open("meeting_room.json", "w") as f:
 ```python
 from src.config_loader import build_pipeline
 
-result = build_pipeline(config, provider="litellm", model="qwen-turbo")
+result = build_pipeline(config, provider="ollama", model="qwen2.5:7b")
 gate = result["gate"]
 gate.run_pipeline(initial_context="按照 meeting_room.json 中的规格开发")
 
@@ -228,7 +237,7 @@ agent_gate/
 │       ├── 02_quality_gate.md        ← 质量闸门判定逻辑
 │       └── 03_oriented_loopback.md   ← 定向回环机制
 ├── configs/                   ← 配置模板
-└── tests/test_core.py         ← 76 个测试
+└── tests/                     ← 127 个测试（pytest）
 ```
 
 ---
@@ -280,7 +289,7 @@ AgentGate 是开源项目（MIT），可自由使用。如果你需要：
 
 - **Bug 报告**: [Issues](https://github.com/zw-onemaker-ai/agent_gate/issues)
 - **功能建议**: [Discussions](https://github.com/zw-onemaker-ai/agent_gate/discussions)
-- **PR**: 确保 `python3 -m pytest tests/test_core.py` 全部通过
+- **PR**: 确保 `python3 -m pytest` 全部通过（CI 自动跑 Python 3.10/3.11/3.12）
 
 ## 许可
 
