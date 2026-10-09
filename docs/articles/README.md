@@ -7,7 +7,7 @@ AgentGate 对外文章的**状态追踪**与**发布要点**。文章正文见�
 | 文件 | 标题 | 目标平台 | 状态 |
 |------|------|---------|:--:|
 | [01_zhihu_5layer_reliability.md](01_zhihu_5layer_reliability.md) | AgentGate：多 Agent 系统的可靠性框架 | 知乎 | 🕐 待发布 |
-| [02_juejin_practical_gate_v3.md](02_juejin_practical_gate_v3.md) | 给你的多Agent管线装三道闸门——代码可以直接跑 | 掘金 | 🕐 待发布 |
+| [02_juejin_practical_gate_v3.md](02_juejin_practical_gate_v3.md) | 给你的多Agent管线装三道闸门——代码可以直接跑 | 掘金 | ✅ [已发布 2026-10-09](https://juejin.cn/post/7694485613907836974)（审核中） |
 | [03_jike_social_v3.md](03_jike_social_v3.md) | 即刻短文案（3 条） | 即刻 | 🕐 待发布 |
 
 > 发布后回填：🕐 待发布 → ✅ 已发布（日期 + 链接）
