@@ -20,7 +20,7 @@ github.com/zw-onemaker-ai/agent_gate
 2. 你说的测试全过，Bash 退出码贴出来（Agent 伪造不了）
 3. 你写的文档，别把内部术语露给客户
 
-76 测试，支持 Ollama/百炼/DeepSeek，MIT，随便用。
+127 测试，支持 Ollama/百炼/DeepSeek，MIT，随便用。
 
 github.com/zw-onemaker-ai/agent_gate
 

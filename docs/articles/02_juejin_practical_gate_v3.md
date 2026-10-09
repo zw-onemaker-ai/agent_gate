@@ -255,13 +255,13 @@ def where_to_go(fail_reason, current_agent):
 
 这套东西的核心思路就一个：**别信 Agent 说的话。信命令行返回的结果。**
 
-76 个测试全过，MIT 协议。代码在 GitHub，clone 下来直接跑：
+127 个测试全过，MIT 协议。代码在 GitHub，clone 下来直接跑：
 
 ```bash
 git clone https://github.com/zw-onemaker-ai/agent_gate
 cd agent_gate
 python3 examples/demo_minimal.py --mock   # 不用模型，先看闸门和验证命令怎么生成
-python3 -m pytest                          # 76 个测试
+python3 -m pytest                          # 127 个测试
 ```
 
 仓库里还有三个可运行的 Demo：`demo_minimal.py`（最小注册）、`demo_content.py`（内容写作场景）、`demo_3role.py`（需求→代码→审查完整管线，可接 Ollama）。

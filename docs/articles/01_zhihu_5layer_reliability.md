@@ -40,16 +40,16 @@ AgentGate 的验证针对的正是这个问题。三道闸门：产出文件必�
 
 | 框架 | GitHub star | 编排方式 | 产出验证 |
 |------|------------|---------|---------|
-| Dify | 152K | 可视化工作流 | 无 |
-| AutoGen | 60K | 多 Agent 对话 | 无 |
-| CrewAI | 57K | 角色协作 | 无 |
-| LangGraph | 39K | 状态机 | 无 |
-| PydanticAI | 19K | 类型安全 Agent | 无 |
+| Dify | 158K | 可视化工作流 | 无 |
+| AutoGen | 61K | 多 Agent 对话 | 无 |
+| CrewAI | 59K | 角色协作 | 无 |
+| LangGraph | 43K | 状态机 | 无 |
+| PydanticAI | 20K | 类型安全 Agent | 无 |
 | LlamaStack | 8K | 模型服务层 | 无 |
 | AG2 | 5K | 多 Agent 对话 | 无 |
 | BeeAI | 3K | 工作流 | 无 |
 
-（star 数截至 2026 年 8 月）
+（star 数截至 2026 年 10 月）
 
 没有一家做验证拦截。这不是某个框架的疏忽，是整个行业的默认假设：Agent 产出可信。RAG 解决的是「引用的事实不存在」这类幻觉，解决不了上面 8 类里的任何一类——RAG 不会告诉你文件不存在，也不会告诉你测试没跑。
 
@@ -101,6 +101,6 @@ AgentGate 不训练模型、不优化推理——模型智能是模型厂商的�
 
 不做 Agent 运行时。ReAct 循环、工具调用、流式输出是底层框架的事，AgentGate 里的 Agent 可以是 LangChain 封装的，也可以是裸 LLM 调用。
 
-76 个测试通过，MIT 协议。还在迭代，欢迎 issue。
+127 个测试通过，每次提交 CI 自动跑。MIT 协议，还在迭代，欢迎 issue。
 
 github.com/zw-onemaker-ai/agent_gate
