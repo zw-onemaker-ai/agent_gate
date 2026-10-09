@@ -5,8 +5,8 @@
 
 <div align="center">
   <a href="https://github.com/zw-onemaker-ai/agent_gate/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-76%20passed-brightgreen" alt="Tests"></a>
-  <a href="#"><img src="https://img.shields.io/badge/version-1.2.0-blue" alt="Version"></a>
+  <a href="https://github.com/zw-onemaker-ai/agent_gate/actions/workflows/ci.yml"><img src="https://github.com/zw-onemaker-ai/agent_gate/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-1.3.4-blue" alt="Version"></a>
   <a href="#"><img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="Python"></a>
 </div>
 
