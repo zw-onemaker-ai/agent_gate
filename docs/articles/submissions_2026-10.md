@@ -49,7 +49,7 @@ python3 -m pytest                          # 127 个测试
 
 **标题**：`【开源自荐】AgentGate：给多 Agent 管线装可靠性闸门`
 
-阮老师好，自荐一个独立开发的开源项目：
+阮老师好，自荐一个开源项目：
 
 https://github.com/zw-onemaker-ai/agent_gate
 

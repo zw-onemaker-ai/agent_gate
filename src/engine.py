@@ -1,6 +1,6 @@
 """AgentGate Engine — model-agnostic quality-gated agent pipeline.
 
-Core design (extracted from 一人公司 v4.4.0):
+Core design (extracted from a production multi-agent pipeline, v4.4.0):
   - Every agent output passes through quality_gate before reaching next agent
   - All Bash verification must carry EXIT_CODE fingerprint
   - Failed gate → oriented loopback (not always back to start)

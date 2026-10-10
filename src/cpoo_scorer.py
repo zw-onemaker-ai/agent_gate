@@ -1,6 +1,6 @@
 """CPOO Scorer — prompt quality evaluation against the 5-module standard (Phase 4).
 
-Based on 一人公司 v4.4.0 CPOO (首席提示词优化官) standard:
+Based on the multi-agent pipeline v4.4.0 CPOO (首席提示词优化官) standard:
   Module 1: Role definition (who/what/why)            — 20 points
   Module 2: Constraints (hard 🔴 + soft 🟡)            — 20 points
   Module 3: Workflow (numbered steps, input→output)    — 20 points
