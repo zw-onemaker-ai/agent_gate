@@ -18,7 +18,7 @@
 
 当你让多个 AI Agent 协作完成一个项目时，怎么保证它们不互相传递垃圾？LangChain/CrewAI/AutoGen 关心的是「怎么串得更灵活」，AgentGate 关心的是「串起来的每一步可不可信」——每个 Agent 的输出必须通过闸门验证才能传给下一个，失败定向回环修复，管线卡死有医生自动诊断。
 
-它沉淀自[多 Agent 工程管线](https://github.com/zw-onemaker-ai)的真实交付场景：多个 AI Agent 分工协作，没有人工逐行审核的奢侈，质量只能由系统自身保证。
+它沉淀自 [OneMaker Pipeline](https://github.com/zw-onemaker-ai/onemaker-pipeline) 的真实交付场景：多个 AI Agent 分工协作，没有人工逐行审核的奢侈，质量只能由系统自身保证。
 
 ---
 
